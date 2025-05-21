@@ -1,0 +1,36 @@
+{
+  "name": "di-lib",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest --silent true --detectOpenHandles",
+    "dev": "ts-node-dev --respawn ./src/app.ts",
+    "generate": "ts-node ./lib/utils/generate-injection.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/chokidar": "^1.7.5",
+    "@types/express": "^5.0.2",
+    "@types/jest": "^29.5.14",
+    "@types/swagger-ui-express": "^4.1.8",
+    "concurrently": "^9.1.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.3.4",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "chokidar": "^4.0.3",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "reflect-metadata": "^0.2.2",
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^3.25.13"
+  }
+}
