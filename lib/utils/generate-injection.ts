@@ -2,6 +2,7 @@ import "reflect-metadata";
 
 import * as chokidar from "chokidar";
 import * as fs from "fs";
+import { minimatch } from "minimatch";
 import * as path from "path";
 
 const PROJECT_ROOT = path.join(__dirname, "..", "..");
@@ -9,19 +10,19 @@ const SERVICES_DIR = path.join(PROJECT_ROOT, "src");
 const OUTPUT_FILE = path.join(PROJECT_ROOT, "lib/global/injection.ts");
 
 // Define paths to exclude from scanning
-const EXCLUDED_FILES = [
-  path.join(PROJECT_ROOT, "src", "app.ts"), // Exclude the main app entry point
-  path.join(PROJECT_ROOT, "lib", "utils", "generate-injection.ts"), // Exclude the generator itself
-  OUTPUT_FILE, // Exclude the generated file
+const EXCLUDED_PATTERNS = [
+  "**/*.spec.ts",
+  "src/app.ts",
+  "lib/utils/generate-injection.ts",
+  "lib/global/injection.ts",
 ];
 
 // Helper to check if a file should be excluded
 function isExcluded(filePath: string): boolean {
-  // Normalize paths for consistent comparison (especially on Windows)
-  const normalizedFilePath = path.normalize(filePath);
-  return EXCLUDED_FILES.some((excludedPath) =>
-    normalizedFilePath.startsWith(path.normalize(excludedPath))
-  );
+  const relativePath = path
+    .relative(PROJECT_ROOT, filePath)
+    .replace(/\\/g, "/");
+  return EXCLUDED_PATTERNS.some((pattern) => minimatch(relativePath, pattern));
 }
 
 const CONTAINER_RELATIVE_PATH = path
@@ -135,10 +136,15 @@ function setupWatcher() {
 
   // Configure chokidar to also ignore the excluded files
   const watcher = chokidar.watch(SERVICES_DIR, {
-    ignored: [
-      /(^|[\/\\])\../, // Ignore dotfiles
-      ...EXCLUDED_FILES.map((p) => path.relative(SERVICES_DIR, p)), // Relative paths for chokidar's ignored option
-    ],
+    ignored: (filePath: string) => {
+      const relativePath = path
+        .relative(PROJECT_ROOT, filePath)
+        .replace(/\\/g, "/");
+      return (
+        relativePath.startsWith(".") || // dotfiles
+        isExcluded(filePath)
+      );
+    },
     persistent: true,
     ignoreInitial: false,
   });

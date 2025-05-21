@@ -5,8 +5,10 @@
   "main": "index.js",
   "scripts": {
     "test": "jest --silent true --detectOpenHandles",
-    "dev": "ts-node-dev --respawn ./src/app.ts",
-    "generate": "ts-node ./lib/utils/generate-injection.ts"
+    "watch:inject": "ts-node lib/utils/generate-injection.ts",
+    "wait:injection": "wait-on lib/global/injection.ts",
+    "start:app": "ts-node src/app.ts",
+    "dev": "concurrently -k -n WATCH,APP -c yellow,green \"npm run watch:inject\" \"sh -c 'npm run wait:injection && npm run start:app'\""
   },
   "keywords": [],
   "author": "",
@@ -23,12 +25,14 @@
     "ts-jest": "^29.3.4",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "wait-on": "^8.0.3"
   },
   "dependencies": {
     "chokidar": "^4.0.3",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
+    "minimatch": "^10.0.1",
     "reflect-metadata": "^0.2.2",
     "swagger-ui-express": "^5.0.1",
     "zod": "^3.25.13"
