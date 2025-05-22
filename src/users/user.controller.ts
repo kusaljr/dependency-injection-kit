@@ -11,11 +11,6 @@ import { CreateUserDto } from "./users.dto";
 import { UserService } from "./users.service";
 
 @Injectable()
-@RateLimit({
-  limit: 5,
-  windowMs: 30 * 1000,
-  errorMessage: "Too many requests, please try again later.",
-})
 @Controller("/users")
 export class UserController {
   constructor(private userService: UserService) {}
@@ -36,9 +31,19 @@ export class UserController {
   }
 
   @Get("/limit")
+  @RateLimit({
+    limit: 5,
+    windowMs: 30 * 1000,
+    errorMessage: "Too many requests, please try again later.",
+  })
   getRateLimit() {
     return {
       message: "Open for all",
     };
+  }
+
+  @Get("/circuit-check")
+  async getCircuitCheck() {
+    return this.userService.unstableMethod();
   }
 }

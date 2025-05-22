@@ -4,74 +4,147 @@ enum CircuitBreakerStatus {
   HALF_OPEN = "HALF_OPEN",
 }
 
-export class CircuitBreaker<T> {
-  private FAILURE_COUNT = 0;
-  private FAILURE_THRESHOLD = 5;
+export class CircuitBreakerClass<T = any> {
+  private failureCount = 0;
   private status: CircuitBreakerStatus = CircuitBreakerStatus.CLOSED;
-  private COOLDOWN_TIME = 10000;
 
-  private SERVICE_FN: () => Promise<T>;
-
-  private fallback?: () => Promise<T>;
+  private readonly serviceFn: () => Promise<T>;
+  private readonly failureThreshold: number;
+  private readonly cooldownTime: number;
+  private readonly fallbackFn: () => Promise<T>;
+  private readonly enableLogging: boolean;
 
   constructor(
-    private serviceFn: () => Promise<T>,
-    private failureThreshold: number = 5,
-    private fallbackFn: () => Promise<T> = async () => {
+    serviceFn: () => Promise<T>,
+    failureThreshold: number = 5,
+    fallbackFn: () => Promise<T> = async () => {
       throw new Error("Fallback executed");
-    }
+    },
+    cooldownTime: number = 10000,
+    enableLogging: boolean = false
   ) {
-    this.SERVICE_FN = serviceFn;
-    this.FAILURE_THRESHOLD = failureThreshold;
-    this.fallback = fallbackFn;
+    this.serviceFn = serviceFn;
+    this.failureThreshold = failureThreshold;
+    this.cooldownTime = cooldownTime;
+    this.fallbackFn = fallbackFn;
+    this.enableLogging = enableLogging;
 
-    console.log(
-      `Circuit breaker initialized with failure threshold: ${this.FAILURE_THRESHOLD}`
+    this.log(
+      `Circuit breaker initialized. Threshold: ${this.failureThreshold}, Cooldown: ${this.cooldownTime}ms`
     );
   }
 
   public async execute(): Promise<T> {
-    if (this.status === CircuitBreakerStatus.OPEN) {
-      console.log("Circuit breaker is open. Cannot execute service function.");
-      if (this.fallback) {
-        console.log("Executing fallback function.");
-        return this.fallback();
-      } else {
-        console.log("No fallback function provided.");
-        return Promise.reject(new Error("Circuit breaker is open"));
-      }
-    }
+    switch (this.status) {
+      case CircuitBreakerStatus.OPEN:
+        this.log("Circuit is OPEN. Rejecting call.");
+        return this.executeFallback();
 
+      case CircuitBreakerStatus.HALF_OPEN:
+        return this.tryHalfOpen();
+
+      case CircuitBreakerStatus.CLOSED:
+      default:
+        return this.tryService();
+    }
+  }
+
+  private async tryService(): Promise<T> {
     try {
-      const result = await this.SERVICE_FN!();
+      const result = await this.serviceFn();
       this.reset();
       return result;
     } catch (error) {
-      this.FAILURE_COUNT++;
-      console.log(`Failure count: ${this.FAILURE_COUNT}`);
-      if (this.FAILURE_COUNT >= this.FAILURE_THRESHOLD) {
+      this.failureCount++;
+      this.log(`Service failed. Failure count: ${this.failureCount}`);
+
+      if (this.failureCount >= this.failureThreshold) {
         this.open();
-        setTimeout(() => {
-          this.close();
-        }, this.COOLDOWN_TIME);
       }
-      return Promise.reject(error);
+
+      throw error;
+    }
+  }
+
+  private async tryHalfOpen(): Promise<T> {
+    this.log("Circuit is HALF_OPEN. Trying one request.");
+    try {
+      const result = await this.serviceFn();
+      this.reset();
+      return result;
+    } catch (error) {
+      this.open();
+      throw error;
     }
   }
 
   private open() {
     this.status = CircuitBreakerStatus.OPEN;
-    console.log("Circuit breaker opened");
-  }
+    this.log("Circuit breaker OPENED. Starting cooldown.");
 
-  private close() {
-    this.status = CircuitBreakerStatus.CLOSED;
-    console.log("Circuit breaker closed");
+    setTimeout(() => {
+      this.status = CircuitBreakerStatus.HALF_OPEN;
+      this.log("Cooldown ended. Circuit is now HALF_OPEN.");
+    }, this.cooldownTime);
   }
 
   private reset() {
+    this.failureCount = 0;
     this.status = CircuitBreakerStatus.CLOSED;
-    this.FAILURE_COUNT = 0;
-    console.log("Circuit breaker reset");
+    this.log("Circuit breaker RESET. Status is CLOSED.");
   }
+
+  private async executeFallback(): Promise<T> {
+    try {
+      this.log("Executing fallback function.");
+      return await this.fallbackFn();
+    } catch (fallbackError) {
+      this.log("Fallback function failed.");
+      throw new Error("Circuit breaker is open and fallback failed");
+    }
+  }
+
+  private log(message: string) {
+    if (this.enableLogging) {
+      console.log(`[CircuitBreaker]: ${message}`);
+    }
+  }
+
+  public getStatus(): CircuitBreakerStatus {
+    return this.status;
+  }
+}
+
+export function CircuitBreaker<T = any>({
+  failureThreshold = 5,
+  fallbackFn = async () => {
+    throw new Error("Fallback executed");
+  },
+  cooldownTime = 10000,
+  enableLogging = false,
+}: {
+  failureThreshold?: number;
+  fallbackFn?: () => Promise<T>;
+  cooldownTime?: number;
+  enableLogging?: boolean;
+}) {
+  return function (
+    target: any,
+    propertyKey: string,
+    descriptor: PropertyDescriptor
+  ) {
+    const originalMethod = descriptor.value;
+
+    const breaker = new CircuitBreakerClass<T>(
+      () => originalMethod.apply(target),
+      failureThreshold,
+      fallbackFn,
+      cooldownTime,
+      enableLogging
+    );
+
+    descriptor.value = function (...args: any[]) {
+      return breaker.execute();
+    };
+  };
 }
