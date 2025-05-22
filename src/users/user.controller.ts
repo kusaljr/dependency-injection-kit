@@ -4,13 +4,14 @@ import {
   Get,
   Param,
   Post,
-  UseMethodInterceptor,
 } from "../../lib/decorators/express";
 import { Injectable } from "../../lib/decorators/injectable";
+import { RateLimit } from "../../lib/ops/rate-limit";
 import { CreateUserDto } from "./users.dto";
 import { UserService } from "./users.service";
 
 @Injectable()
+@RateLimit
 @Controller("/users")
 export class UserController {
   constructor(private userService: UserService) {}
@@ -31,10 +32,6 @@ export class UserController {
   }
 
   @Get("/limit")
-  @UseMethodInterceptor((req, res, next) => {
-    console.log("Inline Method Interceptor hit");
-    next();
-  })
   getRateLimit() {
     return {
       message: "Open for all",
