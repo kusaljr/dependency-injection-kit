@@ -11,7 +11,11 @@ import { CreateUserDto } from "./users.dto";
 import { UserService } from "./users.service";
 
 @Injectable()
-@RateLimit
+@RateLimit({
+  limit: 5,
+  windowMs: 30 * 1000,
+  errorMessage: "Too many requests, please try again later.",
+})
 @Controller("/users")
 export class UserController {
   constructor(private userService: UserService) {}

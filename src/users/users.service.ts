@@ -2,11 +2,12 @@ import { Injectable } from "../../lib/decorators/injectable";
 
 @Injectable()
 export class UserService {
+  users = [
+    { id: 1, name: "Alice" },
+    { id: 2, name: "Bob" },
+  ];
   getUsers() {
-    return [
-      { id: 1, name: "Alice" },
-      { id: 2, name: "Bob" },
-    ];
+    return this.users;
   }
 
   createUser(name: string) {
@@ -14,7 +15,6 @@ export class UserService {
   }
 
   getUserById(id: number) {
-    const users = this.getUsers();
-    return users.find((user) => user.id === id);
+    return this.users.find((user) => user.id === id);
   }
 }

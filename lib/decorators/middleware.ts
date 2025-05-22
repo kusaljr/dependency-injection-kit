@@ -7,7 +7,10 @@ export type InterceptorFunction = (
   next: NextFunction
 ) => void;
 
-export function createDecorator(interceptor: InterceptorFunction) {
+// This returns a decorator (class or method)
+export function createDecorator(
+  interceptor: InterceptorFunction
+): ClassDecorator & MethodDecorator {
   return function (target: any, propertyKey?: string | symbol) {
     if (propertyKey) {
       // Method-level
@@ -30,8 +33,4 @@ export function createDecorator(interceptor: InterceptorFunction) {
       );
     }
   };
-}
-
-export function UseGuard(interceptor: InterceptorFunction) {
-  return createDecorator(interceptor);
 }

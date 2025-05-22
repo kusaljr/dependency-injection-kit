@@ -1,33 +1,44 @@
 import { NextFunction, Request, Response } from "express";
 import { createDecorator } from "../decorators/middleware";
 
+type RateLimitOptions = {
+  limit: number;
+  windowMs: number;
+  errorMessage?: string;
+};
+
 const ipRequestCounts: Record<
   string,
   { count: number; timer?: NodeJS.Timeout }
 > = {};
 
-export const rateLimitMiddleware = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const ip = String(req.ip);
+export const rateLimitMiddleware = (options: RateLimitOptions) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const ip = String(req.ip);
 
-  if (!ipRequestCounts[ip]) {
-    ipRequestCounts[ip] = { count: 1 };
-    // Reset after 10 minutes
-    ipRequestCounts[ip].timer = setTimeout(() => {
-      delete ipRequestCounts[ip];
-    }, 10 * 60 * 1000);
-  } else {
-    ipRequestCounts[ip].count += 1;
-  }
+    if (!ipRequestCounts[ip]) {
+      ipRequestCounts[ip] = { count: 1 };
+      ipRequestCounts[ip].timer = setTimeout(() => {
+        delete ipRequestCounts[ip];
+      }, options.windowMs);
+    } else {
+      ipRequestCounts[ip].count += 1;
+    }
 
-  if (ipRequestCounts[ip].count > 5) {
-    return res.status(429).json({ error: "Too Many Requests" });
-  }
+    if (ipRequestCounts[ip].count > options.limit) {
+      console.log(ipRequestCounts);
+      return res.status(429).json({
+        error:
+          options.errorMessage ||
+          `Rate limit exceeded. Try again in ${
+            options.windowMs / 1000
+          } seconds.`,
+      });
+    }
 
-  next();
+    next();
+  };
 };
 
-export const RateLimit = createDecorator(rateLimitMiddleware);
+export const RateLimit = (options: RateLimitOptions) =>
+  createDecorator(rateLimitMiddleware(options));
