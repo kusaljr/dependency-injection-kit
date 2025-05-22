@@ -1,8 +1,21 @@
-// src/common/auto-router.ts
-import { Application, Request, Response } from "express";
-import { HttpMethod, RouteDefinition } from "../decorators/express";
+import { Application, NextFunction, Request, Response } from "express";
+import {
+  HttpMethod,
+  InterceptorFunction,
+  MethodInterceptor,
+  ParameterDefinition,
+  ParameterType,
+  RouteDefinition,
+} from "../decorators/express";
 import { Constructor, Container } from "../global/container";
 import { findControllerFiles } from "./find-controller";
+
+const wrapMiddleware = (fn: any) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    console.log(">> Calling middleware:", fn.name || "anonymous");
+    return fn(req, res, next);
+  };
+};
 
 export async function registerControllers(
   app: Application,
@@ -48,8 +61,21 @@ export async function registerControllers(
           any
         >;
 
+        const controllerInterceptors: InterceptorFunction[] =
+          Reflect.getMetadata("controllerInterceptors", ControllerClass) || [];
+
+        routes.sort((a, b) => {
+          const aHasParam = a.path.includes(":");
+          const bHasParam = b.path.includes(":");
+          if (aHasParam && !bHasParam) return 1;
+          if (!aHasParam && bHasParam) return -1;
+          return 0;
+        });
+
         routes.forEach((route: RouteDefinition) => {
-          if (typeof instance[String(route.handlerName)] !== "function") {
+          const originalControllerMethod = instance[String(route.handlerName)];
+
+          if (typeof originalControllerMethod !== "function") {
             throw new Error(
               `Handler '${String(route.handlerName)}' for route ${
                 route.path
@@ -58,53 +84,82 @@ export async function registerControllers(
           }
 
           if (Object.values(HttpMethod).includes(route.method as HttpMethod)) {
-            app[route.method as keyof Application](
-              prefix + route.path,
-              async (req: Request, res: Response) => {
-                const handler = instance[String(route.handlerName)];
-                const paramMetadata: any[] =
-                  Reflect.getMetadata(
-                    "parameters",
-                    Object.getPrototypeOf(instance),
-                    route.handlerName
-                  ) || [];
+            const methodInterceptors: MethodInterceptor[] =
+              Reflect.getMetadata(
+                "methodMiddlewares",
+                ControllerClass.prototype,
+                route.handlerName
+              ) || [];
 
-                const args: any[] = [];
+            console.log(
+              `Registering [${route.method.toUpperCase()}] ${prefix}${
+                route.path
+              }`
+            );
 
-                for (const { index, type, name } of paramMetadata) {
-                  switch (type) {
-                    case "param":
-                      args[index] = req.params[name];
-                      break;
-                    case "query":
-                      args[index] = req.query[name];
-                      break;
-                    case "req":
-                      args[index] = req;
-                      break;
-                    case "res":
-                      args[index] = res;
-                      break;
-                    default:
-                      args[index] = undefined;
-                  }
+            const finalRouteHandler = async (
+              req: Request,
+              res: Response,
+              next: NextFunction
+            ) => {
+              const parameters: ParameterDefinition[] =
+                Reflect.getMetadata(
+                  "parameters",
+                  ControllerClass.prototype,
+                  route.handlerName
+                ) || [];
+
+              const args: any[] = new Array(
+                Math.max(...parameters.map((p) => p.index + 1), 0)
+              ).fill(undefined);
+
+              parameters.forEach((param) => {
+                switch (param.type) {
+                  case ParameterType.REQ:
+                    args[param.index] = req;
+                    break;
+                  case ParameterType.RES:
+                    args[param.index] = res;
+                    break;
+                  case ParameterType.PARAM:
+                    args[param.index] = req.params[param.name!];
+                    break;
+                  case ParameterType.QUERY:
+                    args[param.index] = req.query[param.name!];
+                    break;
+                  case ParameterType.BODY:
+                    args[param.index] = req.body;
+                    break;
+                  default:
+                    break;
                 }
+              });
 
-                try {
-                  const result = await handler.apply(instance, args);
-                  if (result !== undefined && !res.headersSent) {
-                    res.json(result);
-                  }
-                } catch (error) {
-                  console.error(
-                    `Error in handler ${String(route.handlerName)}:`,
-                    error
-                  );
-                  if (!res.headersSent) {
-                    res.status(500).json({ error: "Internal Server Error" });
-                  }
+              try {
+                const result = await originalControllerMethod.apply(
+                  instance,
+                  args
+                );
+                if (result !== undefined && !res.headersSent) {
+                  res.json(result);
+                }
+              } catch (error) {
+                console.error(
+                  `Error in handler ${String(route.handlerName)}:`,
+                  error
+                );
+                if (!res.headersSent) {
+                  res.status(500).json({ error: "Internal Server Error" });
                 }
               }
+            };
+
+            app[route.method as keyof Application](
+              prefix + route.path,
+              ...[...controllerInterceptors, ...methodInterceptors].map(
+                wrapMiddleware
+              ),
+              finalRouteHandler.bind(instance)
             );
 
             console.log(

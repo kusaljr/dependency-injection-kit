@@ -23,25 +23,36 @@ export class Container {
     this.registrations.set(token, token);
   }
 
+  private resolving = new Set<Constructor>();
+
   public resolve<T>(token: Constructor<T>): T {
-    if (this.instances.has(token)) {
-      return this.instances.get(token) as T;
+    if (this.resolving.has(token)) {
+      throw new Error(`Cyclic dependency detected for token: ${token.name}`);
     }
 
-    const target = this.registrations.get(token);
+    this.resolving.add(token);
+    try {
+      if (this.instances.has(token)) {
+        return this.instances.get(token) as T;
+      }
 
-    if (!target) {
-      throw new Error(`No registration for token: ${token.name}`);
+      const target = this.registrations.get(token);
+      if (!target) {
+        throw new Error(`No registration for token: ${token.name}`);
+      }
+
+      const paramTypes: Constructor[] =
+        Reflect.getMetadata("design:paramtypes", target) || [];
+
+      const dependencies = paramTypes.map((paramType) =>
+        this.resolve(paramType)
+      );
+
+      const instance = new target(...dependencies);
+      this.instances.set(token, instance);
+      return instance;
+    } finally {
+      this.resolving.delete(token);
     }
-
-    const paramTypes: Constructor[] =
-      Reflect.getMetadata("design:paramtypes", target) || [];
-
-    const dependencies = paramTypes.map((paramType) => this.resolve(paramType));
-    const instance = new target(...dependencies);
-
-    this.instances.set(token, instance);
-
-    return instance;
   }
 }
