@@ -1,18 +1,23 @@
 import { z } from "zod";
-import { createApp } from "../lib/global/create_app";
+import { AppConfig, createApp } from "../lib/global/create_app";
 
 async function bootstrap() {
-  const appConfig = {
+  const appConfig: AppConfig = {
     port: 3000,
     swaggerOptions: {
       title: "My Test API",
       version: "1.0.0",
       description: "API documentation for my application",
     },
+
     envSchema: z.object({
       PORT: z.string(),
       STRIPE_API_KEY: z.string().min(1, "STRIPE_API_KEY is required"),
     }),
+
+    asyncApiOptions: {
+      title: "Socket Documentation",
+    },
   };
 
   try {
