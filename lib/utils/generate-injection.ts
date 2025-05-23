@@ -32,7 +32,7 @@ const CONTAINER_RELATIVE_PATH = path
   )
   .replace(/\\/g, "/");
 
-function findInjectableFiles(dir: string): string[] {
+export function findInjectableFiles(dir: string): string[] {
   let injectableFiles: string[] = [];
   const files = fs.readdirSync(dir);
 
@@ -41,10 +41,11 @@ function findInjectableFiles(dir: string): string[] {
     const stat = fs.statSync(fullPath);
 
     if (stat.isDirectory()) {
-      // Recursively search in subdirectories
       injectableFiles = injectableFiles.concat(findInjectableFiles(fullPath));
-    } else if (file.endsWith(".ts") && !file.endsWith(".d.ts")) {
-      // Only include .ts files (excluding .d.ts) that are NOT in the excluded list
+    } else if (
+      (file.endsWith(".ts") || file.endsWith(".gateway.ts")) &&
+      !file.endsWith(".d.ts")
+    ) {
       if (!isExcluded(fullPath)) {
         injectableFiles.push(fullPath);
       }
@@ -66,55 +67,101 @@ function generateInjectionFile() {
   registrations.push("const container = Container.getInstance();");
   registrations.push("");
 
+  const classMap: Map<string, any> = new Map(); // class name -> class reference
+  const importMap: Map<string, string> = new Map(); // class name -> import path
+  const dependencyGraph: Map<string, Set<string>> = new Map();
+
   for (const filePath of injectableFiles) {
     const absoluteFilePath = path.resolve(filePath);
-    // Crucially, delete the cache *before* attempting to require
-    // This helps ts-node pick up fresh changes, but won't solve initial "module not found" if app.ts imports injection.ts prematurely.
     delete require.cache[absoluteFilePath];
 
     try {
-      // Temporarily bypass module cache for the file being processed if it was problematic
-      // This is less about `require.cache` and more about ts-node's internal loader state.
-      // The primary fix for "Cannot find module '../lib/global/injection'" in app.ts still relies on app.ts *not* importing it immediately.
       const module = require(absoluteFilePath);
 
       for (const key of Object.keys(module)) {
         const ClassRef = module[key];
-        // Ensure it's a function (class) and has the injectable metadata
-        if (
-          typeof ClassRef === "function" &&
-          Reflect.getMetadata("injectable", ClassRef)
-        ) {
-          const relativeImportPathToService = path
-            .relative(path.dirname(OUTPUT_FILE), filePath.replace(/\.ts$/, ""))
-            .replace(/\\/g, "/");
+        if (typeof ClassRef !== "function") continue;
 
-          imports.push(
-            `import { ${key} } from '${relativeImportPathToService}';`
-          );
-          registrations.push(`container.register(${key});`);
-          exports.push(
-            `export const ${
-              key.charAt(0).toLowerCase() + key.slice(1)
-            } = container.resolve(${key});`
-          );
+        const isInjectable = Reflect.getMetadata("injectable", ClassRef);
+        const isSocket = Reflect.getMetadata("socket:metadata", ClassRef);
+        if (!isInjectable && !isSocket) continue;
+
+        const relativeImportPath = path
+          .relative(path.dirname(OUTPUT_FILE), filePath.replace(/\.ts$/, ""))
+          .replace(/\\/g, "/");
+
+        imports.push(`import { ${key} } from '${relativeImportPath}';`);
+
+        classMap.set(key, ClassRef);
+        importMap.set(key, relativeImportPath);
+
+        const paramTypes: any[] =
+          Reflect.getMetadata("design:paramtypes", ClassRef) || [];
+
+        const dependencies = new Set<string>();
+        for (const dep of paramTypes) {
+          if (typeof dep === "function" && dep.name !== "Object") {
+            dependencies.add(dep.name);
+          }
         }
+
+        dependencyGraph.set(key, dependencies);
       }
     } catch (error) {
       console.error(`Error processing file ${filePath}:`, error);
-      // If a file causes an error during processing (e.g., its own imports fail),
-      // it means it likely isn't a simple injectable service that can be dynamically required like this,
-      // or it has an unresolvable dependency within itself.
-      // This is often where the `Cannot find module '../lib/global/injection'` from app.ts comes from.
     }
+  }
+
+  // Topological Sort
+  function topologicalSort(graph: Map<string, Set<string>>): string[] {
+    const visited = new Set<string>();
+    const temp = new Set<string>();
+    const sorted: string[] = [];
+
+    function visit(node: string) {
+      if (visited.has(node)) return;
+      if (temp.has(node)) {
+        throw new Error(`Cyclic dependency detected at ${node}`);
+      }
+
+      temp.add(node);
+      const deps = graph.get(node) || new Set();
+      for (const dep of deps) {
+        if (graph.has(dep)) visit(dep); // Only visit known classes
+      }
+
+      temp.delete(node);
+      visited.add(node);
+      sorted.push(node);
+    }
+
+    for (const node of graph.keys()) {
+      if (!visited.has(node)) visit(node);
+    }
+
+    return sorted;
+  }
+
+  const sortedKeys = topologicalSort(dependencyGraph);
+
+  // Remove duplicate imports and sort
+  imports = Array.from(new Set(imports)).sort();
+
+  for (const key of sortedKeys) {
+    registrations.push(`container.register(${key});`);
+    exports.push(
+      `export const ${
+        key.charAt(0).toLowerCase() + key.slice(1)
+      } = container.resolve(${key});`
+    );
   }
 
   const fileContent = [
     `// This file is auto-generated by the injection watcher. Do not modify manually.`,
-    `// It registers all @Injectable classes with the DI container.`,
+    `// It registers all @Injectable and @Socket classes with the DI container.`,
     `// Generated on: ${new Date().toISOString()}`,
     "",
-    ...imports.sort(), // Sort imports for consistency
+    ...imports,
     "",
     ...registrations,
     "",
@@ -122,14 +169,13 @@ function generateInjectionFile() {
     "",
   ].join("\n");
 
-  // Ensure the directory exists before writing the file
   fs.mkdirSync(path.dirname(OUTPUT_FILE), { recursive: true });
   fs.writeFileSync(OUTPUT_FILE, fileContent);
+
   console.log(
-    `Generated ${OUTPUT_FILE} with ${exports.length} injectable services.`
+    `Generated ${OUTPUT_FILE} with ${exports.length} injectable services or gateways.`
   );
 }
-
 // --- Main Execution ---
 function setupWatcher() {
   console.log(`Watching for changes in ${SERVICES_DIR}...`);

@@ -10,18 +10,70 @@ import {
 import { Constructor, Container } from "../global/container";
 import { findControllerFiles } from "./find-controller";
 
+import * as fs from "fs";
+import * as path from "path";
+import { WebSocketServer } from "../ops/socket/web-socket";
+
 const wrapMiddleware = (fn: any) => {
   return (req: Request, res: Response, next: NextFunction) => {
-    console.log(">> Calling middleware:", fn.name || "anonymous");
     return fn(req, res, next);
   };
 };
 
+const colorText = {
+  green: (text: string) => `\x1b[32m${text}\x1b[0m`,
+  orange: (text: string) => `\x1b[33m${text}\x1b[0m`,
+  yellow: (text: string) => `\x1b[33m${text}\x1b[0m`,
+  red: (text: string) => `\x1b[31m${text}\x1b[0m`,
+  cyan: (text: string) => `\x1b[36m${text}\x1b[0m`,
+  magenta: (text: string) => `\x1b[35m${text}\x1b[0m`,
+  white: (text: string) => `\x1b[37m${text}\x1b[0m`,
+};
+
+const colorMethod = (method: string): string => {
+  switch (method.toUpperCase()) {
+    case "GET":
+      return colorText.green(method.toUpperCase());
+    case "POST":
+      return colorText.orange(method.toUpperCase());
+    case "PATCH":
+      return colorText.yellow(method.toUpperCase());
+    case "DELETE":
+      return colorText.red(method.toUpperCase());
+    default:
+      return colorText.white(method.toUpperCase());
+  }
+};
+
+// Helper to recursively find gateway files (*.gateway.ts or *.gateway.js)
+function findGatewayFiles(dir: string): string[] {
+  let gatewayFiles: string[] = [];
+  const files = fs.readdirSync(dir);
+
+  for (const file of files) {
+    const fullPath = path.join(dir, file);
+    const stat = fs.statSync(fullPath);
+
+    if (stat.isDirectory()) {
+      gatewayFiles = gatewayFiles.concat(findGatewayFiles(fullPath));
+    } else if (
+      (file.endsWith(".gateway.ts") || file.endsWith(".gateway.js")) &&
+      !file.endsWith(".d.ts")
+    ) {
+      gatewayFiles.push(fullPath);
+    }
+  }
+
+  return gatewayFiles;
+}
+
 export async function registerControllers(
   app: Application,
   controllersDir: string,
-  container: Container
+  container: Container,
+  websocketPort = 3001
 ) {
+  // ---- Register Express Controllers ----
   const files = findControllerFiles(controllersDir);
 
   for (const filePath of files) {
@@ -91,12 +143,6 @@ export async function registerControllers(
                 route.handlerName
               ) || [];
 
-            console.log(
-              `Registering [${route.method.toUpperCase()}] ${prefix}${
-                route.path
-              }`
-            );
-
             const finalRouteHandler = async (
               req: Request,
               res: Response,
@@ -163,9 +209,11 @@ export async function registerControllers(
             );
 
             console.log(
-              `Registered route: [${route.method.toUpperCase()}] ${prefix}${
-                route.path
-              } -> ${ControllerClass.name}.${String(route.handlerName)}`
+              `Registered route: [${colorMethod(
+                route.method
+              )}] ${colorText.cyan(prefix + route.path)} -> ${colorText.magenta(
+                `${ControllerClass.name}.${String(route.handlerName)}`
+              )}`
             );
           } else {
             console.warn(
@@ -182,4 +230,34 @@ export async function registerControllers(
       );
     }
   }
+
+  const wsServer = new WebSocketServer(websocketPort);
+
+  const gatewayFiles = findGatewayFiles(controllersDir);
+
+  for (const filePath of gatewayFiles) {
+    if (
+      !filePath.endsWith(".gateway.ts") &&
+      !filePath.endsWith(".gateway.js")
+    ) {
+      console.warn(`Skipping non-gateway file: ${filePath}`);
+      continue;
+    }
+
+    const module = require(filePath);
+
+    for (const key of Object.keys(module)) {
+      const GatewayClass = module[key];
+
+      const isSocket = Reflect.getMetadata("socket:metadata", GatewayClass);
+      if (!isSocket) continue;
+
+      const instance = container.resolve(GatewayClass);
+      wsServer.registerHandler(instance);
+
+      console.log(`Registered WebSocket Gateway: ${GatewayClass.name}`);
+    }
+  }
+
+  wsServer.start();
 }
