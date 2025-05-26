@@ -12,8 +12,11 @@ import { findControllerFiles } from "./find-controller";
 
 import * as fs from "fs";
 import * as path from "path";
+import { REACT_METADATA } from "../ops/react/decorator";
+import { renderReactView } from "../ops/react/render-react-view";
 import { SOCKET_METADATA_KEY } from "../ops/socket/decorator";
 import { WebSocketServer } from "../ops/socket/web-socket";
+import { generateReactView } from "./static/generate-react-view";
 
 const wrapMiddleware = (fn: any) => {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -134,6 +137,83 @@ export async function registerControllers(
                 route.path
               } in ${ControllerClass.name} is not a function.`
             );
+          }
+
+          const hasReactMetadata = Reflect.getMetadata(
+            REACT_METADATA,
+            ControllerClass.prototype,
+            route.handlerName
+          );
+
+          if (hasReactMetadata) {
+            generateReactView(
+              ControllerClass.name,
+              String(route.handlerName),
+              filePath,
+              prefix + route.path
+            );
+            const handler = String(route.handlerName);
+            const tsxFile = path.join(
+              path.dirname(filePath),
+              "views",
+              `${ControllerClass.name.toLowerCase()}.${handler}.tsx`
+            );
+
+            app.get(`${prefix + route.path}.view`, async (req, res) => {
+              try {
+                // Call the original controller method to get data
+                const parameters: ParameterDefinition[] =
+                  Reflect.getMetadata(
+                    "parameters",
+                    ControllerClass.prototype,
+                    route.handlerName
+                  ) || [];
+
+                const args: any[] = new Array(
+                  Math.max(...parameters.map((p) => p.index + 1), 0)
+                ).fill(undefined);
+
+                parameters.forEach((param) => {
+                  switch (param.type) {
+                    case ParameterType.REQ:
+                      args[param.index] = req;
+                      break;
+                    case ParameterType.RES:
+                      args[param.index] = res;
+                      break;
+                    case ParameterType.PARAM:
+                      args[param.index] = (req.params as Record<string, any>)[
+                        param.name!
+                      ];
+                      break;
+                    case ParameterType.QUERY:
+                      args[param.index] = (req.query as Record<string, any>)[
+                        param.name!
+                      ];
+                      break;
+                    case ParameterType.BODY:
+                      args[param.index] = req.body;
+                      break;
+                    default:
+                      break;
+                  }
+                });
+
+                const result = await originalControllerMethod.apply(
+                  instance,
+                  args
+                );
+                const html = await renderReactView(tsxFile, result);
+
+                res.send(html);
+              } catch (err) {
+                console.error(
+                  `Failed to render React view for ${prefix + route.path}:`,
+                  err
+                );
+                res.status(500).send("Server rendering failed");
+              }
+            });
           }
 
           if (Object.values(HttpMethod).includes(route.method as HttpMethod)) {

@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from "express";
-import { createDecorator } from "../decorators/middleware";
+import { createDecorator } from "../../decorators/middleware";
 
 type RateLimitOptions = {
   limit: number;
