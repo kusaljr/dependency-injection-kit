@@ -145,77 +145,17 @@ export async function registerControllers(
             route.handlerName
           );
 
+          // Generate React view file if metadata exists
           if (hasReactMetadata) {
             generateReactView(
               ControllerClass.name,
               String(route.handlerName),
               filePath,
-              prefix + route.path
+              prefix + route.path // Pass the original API route for display
             );
-            const handler = String(route.handlerName);
-            const tsxFile = path.join(
-              path.dirname(filePath),
-              "views",
-              `${ControllerClass.name.toLowerCase()}.${handler}.tsx`
-            );
-
-            app.get(`${prefix + route.path}.view`, async (req, res) => {
-              try {
-                // Call the original controller method to get data
-                const parameters: ParameterDefinition[] =
-                  Reflect.getMetadata(
-                    "parameters",
-                    ControllerClass.prototype,
-                    route.handlerName
-                  ) || [];
-
-                const args: any[] = new Array(
-                  Math.max(...parameters.map((p) => p.index + 1), 0)
-                ).fill(undefined);
-
-                parameters.forEach((param) => {
-                  switch (param.type) {
-                    case ParameterType.REQ:
-                      args[param.index] = req;
-                      break;
-                    case ParameterType.RES:
-                      args[param.index] = res;
-                      break;
-                    case ParameterType.PARAM:
-                      args[param.index] = (req.params as Record<string, any>)[
-                        param.name!
-                      ];
-                      break;
-                    case ParameterType.QUERY:
-                      args[param.index] = (req.query as Record<string, any>)[
-                        param.name!
-                      ];
-                      break;
-                    case ParameterType.BODY:
-                      args[param.index] = req.body;
-                      break;
-                    default:
-                      break;
-                  }
-                });
-
-                const result = await originalControllerMethod.apply(
-                  instance,
-                  args
-                );
-                const html = await renderReactView(tsxFile, result);
-
-                res.send(html);
-              } catch (err) {
-                console.error(
-                  `Failed to render React view for ${prefix + route.path}:`,
-                  err
-                );
-                res.status(500).send("Server rendering failed");
-              }
-            });
           }
 
+          // Define the single route handler for both JSON API and React View
           if (Object.values(HttpMethod).includes(route.method as HttpMethod)) {
             const methodInterceptors: MethodInterceptor[] =
               Reflect.getMetadata(
@@ -249,10 +189,14 @@ export async function registerControllers(
                     args[param.index] = res;
                     break;
                   case ParameterType.PARAM:
-                    args[param.index] = req.params[param.name!];
+                    args[param.index] = (req.params as Record<string, any>)[
+                      param.name!
+                    ];
                     break;
                   case ParameterType.QUERY:
-                    args[param.index] = req.query[param.name!];
+                    args[param.index] = (req.query as Record<string, any>)[
+                      param.name!
+                    ];
                     break;
                   case ParameterType.BODY:
                     args[param.index] = req.body;
@@ -267,12 +211,26 @@ export async function registerControllers(
                   instance,
                   args
                 );
-                if (result !== undefined && !res.headersSent) {
-                  res.json(result);
+
+                if (hasReactMetadata && req.accepts("html")) {
+                  const handler = String(route.handlerName);
+                  const tsxFile = path.join(
+                    path.dirname(filePath),
+                    "views", // Assuming 'views' subdirectory
+                    `${ControllerClass.name.toLowerCase()}.${handler}.tsx`
+                  );
+                  const html = await renderReactView(tsxFile, result);
+                  res.send(html);
+                } else {
+                  if (result !== undefined && !res.headersSent) {
+                    res.json(result);
+                  }
                 }
               } catch (error) {
                 console.error(
-                  `Error in handler ${String(route.handlerName)}:`,
+                  `Error in handler ${String(route.handlerName)} for route ${
+                    prefix + route.path
+                  }:`,
                   error
                 );
                 if (!res.headersSent) {
@@ -294,7 +252,7 @@ export async function registerControllers(
                 route.method
               )}] ${colorText.cyan(prefix + route.path)} -> ${colorText.magenta(
                 `${ControllerClass.name}.${String(route.handlerName)}`
-              )}`
+              )} ${hasReactMetadata ? colorText.green("(+React View)") : ""}`
             );
           } else {
             console.warn(
