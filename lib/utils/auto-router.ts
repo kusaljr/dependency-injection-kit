@@ -12,6 +12,7 @@ import { findControllerFiles } from "./find-controller";
 
 import * as fs from "fs";
 import * as path from "path";
+import { SOCKET_METADATA_KEY } from "../ops/socket/decorator";
 import { WebSocketServer } from "../ops/socket/web-socket";
 
 const wrapMiddleware = (fn: any) => {
@@ -249,7 +250,7 @@ export async function registerControllers(
     for (const key of Object.keys(module)) {
       const GatewayClass = module[key];
 
-      const isSocket = Reflect.getMetadata("socket:metadata", GatewayClass);
+      const isSocket = Reflect.getMetadata(SOCKET_METADATA_KEY, GatewayClass);
       if (!isSocket) continue;
 
       const instance = container.resolve(GatewayClass);

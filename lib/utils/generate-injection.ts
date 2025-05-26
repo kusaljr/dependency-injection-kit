@@ -1,9 +1,9 @@
 import "reflect-metadata";
 
-import * as chokidar from "chokidar";
 import * as fs from "fs";
 import { minimatch } from "minimatch";
 import * as path from "path";
+import { SOCKET_METADATA_KEY } from "../ops/socket/decorator";
 
 const PROJECT_ROOT = path.join(__dirname, "..", "..");
 const SERVICES_DIR = path.join(PROJECT_ROOT, "src");
@@ -51,6 +51,7 @@ export function findInjectableFiles(dir: string): string[] {
       }
     }
   }
+
   return injectableFiles;
 }
 
@@ -67,8 +68,8 @@ function generateInjectionFile() {
   registrations.push("const container = Container.getInstance();");
   registrations.push("");
 
-  const classMap: Map<string, any> = new Map(); // class name -> class reference
-  const importMap: Map<string, string> = new Map(); // class name -> import path
+  const classMap: Map<string, any> = new Map();
+  const importMap: Map<string, string> = new Map();
   const dependencyGraph: Map<string, Set<string>> = new Map();
 
   for (const filePath of injectableFiles) {
@@ -81,9 +82,9 @@ function generateInjectionFile() {
       for (const key of Object.keys(module)) {
         const ClassRef = module[key];
         if (typeof ClassRef !== "function") continue;
-
         const isInjectable = Reflect.getMetadata("injectable", ClassRef);
-        const isSocket = Reflect.getMetadata("socket:metadata", ClassRef);
+        const isSocket = Reflect.getMetadata(SOCKET_METADATA_KEY, ClassRef);
+
         if (!isInjectable && !isSocket) continue;
 
         const relativeImportPath = path
@@ -176,45 +177,5 @@ function generateInjectionFile() {
     `Generated ${OUTPUT_FILE} with ${exports.length} injectable services or gateways.`
   );
 }
-// --- Main Execution ---
-function setupWatcher() {
-  console.log(`Watching for changes in ${SERVICES_DIR}...`);
 
-  // Configure chokidar to also ignore the excluded files
-  const watcher = chokidar.watch(SERVICES_DIR, {
-    ignored: (filePath: string) => {
-      const relativePath = path
-        .relative(PROJECT_ROOT, filePath)
-        .replace(/\\/g, "/");
-      return (
-        relativePath.startsWith(".") || // dotfiles
-        isExcluded(filePath)
-      );
-    },
-    persistent: true,
-    ignoreInitial: false,
-  });
-
-  watcher
-    .on("add", (filePath) => {
-      console.log(`File ${filePath} has been added.`);
-      generateInjectionFile();
-    })
-    .on("change", (filePath) => {
-      console.log(`File ${filePath} has been changed.`);
-      generateInjectionFile();
-    })
-    .on("unlink", (filePath) => {
-      console.log(`File ${filePath} has been removed.`);
-      generateInjectionFile();
-    })
-    .on("error", (error) => console.error(`Watcher error: ${error}`))
-    .on("ready", () =>
-      console.log("Initial scan complete. Ready for changes.")
-    );
-}
-
-// Initial generation run
 generateInjectionFile();
-// Set up the file watcher
-setupWatcher();

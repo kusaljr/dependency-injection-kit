@@ -1,3 +1,5 @@
+import "reflect-metadata";
+
 export const SOCKET_EVENTS_KEY = Symbol("socket:events");
 export const SOCKET_METADATA_KEY = Symbol("socket:metadata");
 
