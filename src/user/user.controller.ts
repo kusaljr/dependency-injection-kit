@@ -1,11 +1,12 @@
-import { Controller, Get, Post } from "../../lib/decorators/express";
+import { Controller, Get, Post, Query } from "../../lib/decorators/express";
 import { React } from "../../lib/ops/react/decorator";
 
 @Controller("/user")
 export class UserController {
   @Get("/")
   @React()
-  getUser() {
+  getUser(@Query("id") id: string) {
+    console.log("Fetching user with ID:", id);
     return {
       data: {
         id: 1,

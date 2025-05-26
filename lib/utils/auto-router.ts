@@ -252,7 +252,11 @@ export async function registerControllers(
                 route.method
               )}] ${colorText.cyan(prefix + route.path)} -> ${colorText.magenta(
                 `${ControllerClass.name}.${String(route.handlerName)}`
-              )} ${hasReactMetadata ? colorText.green("(+React View)") : ""}`
+              )} ${
+                hasReactMetadata
+                  ? colorText.cyan("(Server rendered React View)")
+                  : ""
+              }`
             );
           } else {
             console.warn(
