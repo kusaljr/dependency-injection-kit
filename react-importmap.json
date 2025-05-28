@@ -1,6 +1,9 @@
 {
   "imports": {
     "react": "https://esm.sh/react@19.1.0",
+    "react-dom": "https://esm.sh/react-dom@19.1.0",
+    "leaflet": "https://esm.sh/leaflet@1.9.4",
+    "react-leaflet": "https://esm.sh/react-leaflet@5.0.0",
     "react-dom/client": "https://esm.sh/react-dom@19.1.0/client"
   }
 }
