@@ -1,27 +1,23 @@
-import { Controller, Get, Post, Query } from "../../lib/decorators/express";
+import { Controller, Get } from "../../lib/decorators/express";
 import { React } from "../../lib/ops/react/decorator";
+import { UserService } from "./user.service";
 
 @Controller("/user")
 export class UserController {
-  @Get("/")
-  @React()
-  getUser(@Query("id") id: string) {
-    console.log("Fetching user with ID:", id);
-    return {
-      data: {
-        id: 1,
-        name: "John Doe",
-      },
-    };
+  constructor(private readonly userService: UserService) {
+    // Initialization if needed
   }
 
-  @Post("/create")
-  createUser() {
+  @Get("/profile")
+  getProfile() {
+    return this.userService.getUserProfile();
+  }
+
+  @Get("/list")
+  @React()
+  getUserList() {
     return {
-      data: {
-        id: 2,
-        name: "Jane Doe",
-      },
+      data: this.userService.getUserList(),
     };
   }
 }

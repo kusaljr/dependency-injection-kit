@@ -7,6 +7,7 @@
     "test": "jest --silent true --detectOpenHandles",
     "watch:inject": "ts-node lib/utils/generate-injection.ts",
     "wait:injection": "wait-on lib/global/injection.ts",
+    "client": "bun run lib/utils/static/client-install.ts",
     "start:app": "ts-node src/app.ts",
     "dev": "concurrently -k -n WATCH,APP -c yellow,green \"npm run watch:inject\" \"sh -c 'npm run wait:injection && npm run start:app'\""
   },
@@ -36,8 +37,6 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "minimatch": "^10.0.1",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
     "reflect-metadata": "^0.2.2",
     "server": "react-dom/server",
     "swagger-ui-express": "^5.0.1",

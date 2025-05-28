@@ -216,10 +216,11 @@ export async function registerControllers(
                   const handler = String(route.handlerName);
                   const tsxFile = path.join(
                     path.dirname(filePath),
-                    "views", // Assuming 'views' subdirectory
-                    `${ControllerClass.name.toLowerCase()}.${handler}.tsx`
+                    "views",
+                    `${ControllerClass.name}.${handler}.jsx`
                   );
-                  const html = await renderReactView(tsxFile, result);
+
+                  const html = renderReactView(tsxFile, result);
                   res.send(html);
                 } else {
                   if (result !== undefined && !res.headersSent) {
