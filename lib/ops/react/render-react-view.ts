@@ -38,6 +38,11 @@ export function renderReactView(
 
   const importMap = fs.readFileSync("react-importmap.json", "utf8");
 
+  const componentName = (componentFilePath.split("/").pop() || "")
+    .replace(/\.[^/.]+$/, "")
+    // replace . with _ to avoid issues with React.createElement
+    .replace(/\./g, "_");
+
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -53,7 +58,7 @@ export function renderReactView(
   </script>
 </head>
 <body>
-  <div id="root" style="height: 100vh; width: 100vw;"></div>
+  <div id="root"></div>
 
   <script>
     window.__PROPS__ = ${serializedProps};
@@ -64,19 +69,9 @@ export function renderReactView(
 
     import React from "react";
     import ReactDOM from "react-dom/client";
-    import L from "leaflet";
-
-    if (typeof L !== "undefined" && L.Icon && L.Icon.Default) {
-      delete L.Icon.Default.prototype._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-        iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-        shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png"
-      });
-    }
 
     const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(React.createElement(UserController_getUserList));
+    root.render(React.createElement(${componentName}, window.__PROPS__));
   </script>
 </body>
 </html>

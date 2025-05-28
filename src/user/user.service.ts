@@ -3,9 +3,9 @@ import { Injectable } from "../../lib/decorators/injectable";
 @Injectable()
 export class UserService {
   private users = [
-    { id: 1, name: "Alice" },
-    { id: 2, name: "Bob" },
-    { id: 3, name: "Charlie" },
+    { id: 1, name: "Alice in the wonderland" },
+    { id: 2, name: "Bob the builder" },
+    { id: 3, name: "Charlie Chaplin" },
   ];
 
   getUserProfile() {
