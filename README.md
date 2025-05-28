@@ -56,3 +56,10 @@ export class ExampleController {
 
 }
 ```
+
+### Add Packages 
+You can add client side packages by running the following command:
+```bash
+npm run client ${packageName}
+```
+This will generate a esm imports in `react-importmap.json` file and automatically added to final client bundle.
