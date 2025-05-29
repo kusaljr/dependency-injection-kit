@@ -20,7 +20,6 @@ export function generateReactView(
   const componentName = `${controllerClassName}_${methodName}`;
 
   if (fs.existsSync(jsxFilePath)) {
-    console.log(`❕ React view already exists: ${jsxFilePath}`);
     return;
   }
 
