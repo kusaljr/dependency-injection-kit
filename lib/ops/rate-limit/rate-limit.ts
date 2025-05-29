@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from "express";
-import { createDecorator } from "../../decorators/middleware";
+import { useInterceptor } from "../../decorators/middleware";
 
 type RateLimitOptions = {
   limit: number;
@@ -40,4 +40,4 @@ export const rateLimitMiddleware = (options: RateLimitOptions) => {
 };
 
 export const RateLimit = (options: RateLimitOptions) =>
-  createDecorator(rateLimitMiddleware(options));
+  useInterceptor(rateLimitMiddleware(options));

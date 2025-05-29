@@ -1,23 +1,30 @@
 import { NextFunction, Request, Response } from "express";
-import { createDecorator } from "../../lib/decorators/middleware";
+import { useInterceptor } from "../../lib/decorators/middleware";
 
-export const checkAuth = () => {
-  return (req: Request, res: Response, next: NextFunction) => {
-    // const token = req.headers.authorization?.split(" ")[1];
-    // if (!token) {
-    //   return res
-    //     .status(401)
-    //     .json({ message: "Unauthorized", error: "No token provided" });
-    // }
-    try {
-      (req as any).user = { id: 1, name: "Test User" };
-      next();
-    } catch (error) {
-      return res
-        .status(401)
-        .json({ message: "Unauthorized", error: "Error validating token" });
-    }
-  };
-};
+// export const checkAuth = () => {
+//   return (req: Request, res: Response, next: NextFunction) => {
+//     // const token = req.headers.authorization?.split(" ")[1];
+//     // if (!token) {
+//     //   return res
+//     //     .status(401)
+//     //     .json({ message: "Unauthorized", error: "No token provided" });
+//     // }
+//     try {
+//       (req as any).user = { id: 1, name: "Test User" };
+//       next();
+//     } catch (error) {
+//       return res
+//         .status(401)
+//         .json({ message: "Unauthorized", error: "Error validating token" });
+//     }
+//   };
+// };
 
-export const IsAuthenticated = () => createDecorator(checkAuth());
+// export const IsAuthenticated = () => useInterceptor(checkAuth());
+
+export const IsAuthenticated = () =>
+  useInterceptor((req: Request, res: Response, next: NextFunction) => {
+    // Simulate user authentication
+    (req as any).user = { id: 1, name: "Test User" };
+    next();
+  });

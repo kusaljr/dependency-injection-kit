@@ -11,7 +11,7 @@ This library provides a simple and flexible way to manage dependencies in your E
  Example:
 ```typescript
 // Example Controller
-import { Controller, Get, Inject } from 'express-dependency-injection';
+import { Controller, Get } from 'express-di-kit';
 @Controller('/example')
 export class ExampleController {
 
@@ -25,7 +25,7 @@ export class ExampleController {
 }
 
 // Example Service
-import { Service } from 'express-dependency-injection';
+import { Injectable } from 'express-di-kit';
 @Injectable()
 export class ExampleService {
   getData() {
@@ -35,6 +35,37 @@ export class ExampleService {
 ```
 
 
+### Middleware Injection
+ You can also inject services into your middleware functions. This allows you to use your services in your middleware logic without having to manually instantiate them.
+
+ Example:
+```typescript
+import { useInterceptor } from 'express-di-kit';
+
+export const MiddlewareFunction = () =>
+  useInterceptor((req: Request, res: Response, next: NextFunction) => {
+    // Simulate user authentication
+    (req as any).user = { id: 1, name: "Test User" };
+    next();
+  });
+
+
+
+@Controller('/example')
+export class ExampleController {
+
+  constructor(private exampleService: ExampleService) {}
+
+  @Get('/')
+  @MiddlewareFunction()
+  async getExample(req: Request, res: Response) {
+    // Access the user from the request object
+    const user = (req as any).user;
+    return this.exampleService.getData(user);
+  }
+}
+```
+
 
 
 ## React Server Rendering
@@ -43,7 +74,7 @@ By using `@React()` decorator, you can render React components on the server and
 
 Example:
 ```typescript
-import { Controller, Get, React } from 'express-dependency-injection';
+import { Controller, Get, React } from 'express-di-kit';
 
 @Controller('/example')
 export class ExampleController {

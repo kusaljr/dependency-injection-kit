@@ -8,7 +8,7 @@ export type InterceptorFunction = (
 ) => void;
 
 // This returns a decorator (class or method)
-export function createDecorator(
+export function useInterceptor(
   interceptor: InterceptorFunction
 ): ClassDecorator & MethodDecorator {
   return function (target: any, propertyKey?: string | symbol) {
