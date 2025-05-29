@@ -86,7 +86,6 @@ export default function UserController_getUserList() {
         </table>
       </div>
       <GhantaComponent />
-      <Button />
     </div>
   );
 }
@@ -95,11 +94,11 @@ function GhantaComponent() {
   const [counter, setCounter] = useState(0);
 
   return (
-    <button
+    <Button
       className="w-60 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
       onClick={() => setCounter(counter + 1)}
     >
       Increment Counter {counter}
-    </button>
+    </Button>
   );
 }

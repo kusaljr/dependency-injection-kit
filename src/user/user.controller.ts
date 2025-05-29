@@ -5,15 +5,15 @@ import { IsAuthenticated } from "./jwt-middleware";
 import { UserService } from "./user.service";
 
 @Controller("/user")
+@RateLimit({
+  limit: 5,
+  windowMs: 30 * 1000,
+  errorMessage: "Too many requests, please try again later.",
+})
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Get("/profile")
-  @RateLimit({
-    limit: 5,
-    windowMs: 30 * 1000,
-    errorMessage: "Too many requests, please try again later.",
-  })
   getProfile() {
     return this.userService.getUserProfile();
   }
