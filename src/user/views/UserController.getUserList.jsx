@@ -33,7 +33,7 @@ function UserController_getUserList() {
   );
 
   const table = useReactTable({
-    data: props.data,
+    data: props.data.users,
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
@@ -43,6 +43,11 @@ function UserController_getUserList() {
       <h1 className="text-2xl font-bold text-gray-800">
         User List from /user/list
       </h1>
+
+      <p className="text-gray-600">
+        You are logged in as{" "}
+        <span className="font-semibold">{props.data.currentUser.name}</span>
+      </p>
 
       <div className="w-full max-w-4xl bg-white shadow-md rounded-lg p-6">
         <h2 className="text-lg font-semibold text-gray-700 mb-4">User Table</h2>

@@ -1,23 +1,32 @@
-import { Controller, Get } from "../../lib/decorators/express";
+import { Controller, Get, Req } from "../../lib/decorators/express";
+import { RateLimit } from "../../lib/ops/rate-limit/rate-limit";
 import { React } from "../../lib/ops/react/decorator";
+import { IsAuthenticated } from "./jwt-middleware";
 import { UserService } from "./user.service";
 
 @Controller("/user")
 export class UserController {
-  constructor(private readonly userService: UserService) {
-    // Initialization if needed
-  }
+  constructor(private readonly userService: UserService) {}
 
   @Get("/profile")
+  @RateLimit({
+    limit: 5,
+    windowMs: 30 * 1000,
+    errorMessage: "Too many requests, please try again later.",
+  })
   getProfile() {
     return this.userService.getUserProfile();
   }
 
   @Get("/list")
   @React()
-  getUserList() {
+  @IsAuthenticated()
+  getUserList(@Req req: Request & { user: { id: number; name: string } }) {
     return {
-      data: this.userService.getUserList(),
+      data: {
+        users: this.userService.getUserList(),
+        currentUser: req.user,
+      },
     };
   }
 }

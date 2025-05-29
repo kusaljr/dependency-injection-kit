@@ -26,7 +26,6 @@ export const rateLimitMiddleware = (options: RateLimitOptions) => {
     }
 
     if (ipRequestCounts[ip].count > options.limit) {
-      console.log(ipRequestCounts);
       return res.status(429).json({
         error:
           options.errorMessage ||
