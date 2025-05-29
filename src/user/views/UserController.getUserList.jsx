@@ -6,7 +6,9 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
-import { Button } from "./button";
+import { Button } from "../../ui-components/button";
+// Extend the Window interface to include __PROPS__
+
 // Hook to grab props passed from server
 function useServerProps() {
   return window.__PROPS__ || {};
@@ -15,9 +17,6 @@ function useServerProps() {
 export default function UserController_getUserList() {
   const props = useServerProps();
 
-  // Assume props.users is the array of user data
-
-  // Define columns
   const columns = useMemo(
     () => [
       {

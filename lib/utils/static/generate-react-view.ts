@@ -33,7 +33,7 @@ function useServerProps() {
   return window.__PROPS__ || {};
 }
 
- function ${componentName}() {
+export default function ${componentName}() {
   const props = useServerProps();
   
   return (

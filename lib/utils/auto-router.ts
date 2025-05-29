@@ -13,10 +13,10 @@ import { findControllerFiles } from "./find-controller";
 import * as fs from "fs";
 import * as path from "path";
 import { REACT_METADATA } from "../ops/react/decorator";
-import { renderReactView } from "../ops/react/render-react-view";
 import { SOCKET_METADATA_KEY } from "../ops/socket/decorator";
 import { WebSocketServer } from "../ops/socket/web-socket";
 import { generateReactView } from "./static/generate-react-view";
+import { renderReactView } from "./static/render-react-view";
 
 const wrapMiddleware = (fn: any) => {
   return (req: Request, res: Response, next: NextFunction) => {
