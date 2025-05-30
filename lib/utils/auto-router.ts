@@ -275,33 +275,39 @@ export async function registerControllers(
     }
   }
 
-  const wsServer = new WebSocketServer(websocketPort);
+  //
 
   const gatewayFiles = findGatewayFiles(controllersDir);
 
-  for (const filePath of gatewayFiles) {
-    if (
-      !filePath.endsWith(".gateway.ts") &&
-      !filePath.endsWith(".gateway.js")
-    ) {
-      console.warn(`Skipping non-gateway file: ${filePath}`);
-      continue;
+  if (gatewayFiles.length === 0) {
+    return;
+  } else {
+    const wsServer = new WebSocketServer(websocketPort);
+
+    for (const filePath of gatewayFiles) {
+      if (
+        !filePath.endsWith(".gateway.ts") &&
+        !filePath.endsWith(".gateway.js")
+      ) {
+        console.warn(`Skipping non-gateway file: ${filePath}`);
+        continue;
+      }
+
+      const module = require(filePath);
+
+      for (const key of Object.keys(module)) {
+        const GatewayClass = module[key];
+
+        const isSocket = Reflect.getMetadata(SOCKET_METADATA_KEY, GatewayClass);
+        if (!isSocket) continue;
+
+        const instance = container.resolve(GatewayClass);
+        wsServer.registerHandler(instance);
+
+        console.log(`Registered WebSocket Gateway: ${GatewayClass.name}`);
+      }
     }
 
-    const module = require(filePath);
-
-    for (const key of Object.keys(module)) {
-      const GatewayClass = module[key];
-
-      const isSocket = Reflect.getMetadata(SOCKET_METADATA_KEY, GatewayClass);
-      if (!isSocket) continue;
-
-      const instance = container.resolve(GatewayClass);
-      wsServer.registerHandler(instance);
-
-      console.log(`Registered WebSocket Gateway: ${GatewayClass.name}`);
-    }
+    wsServer.start();
   }
-
-  wsServer.start();
 }

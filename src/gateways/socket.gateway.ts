@@ -1,4 +1,4 @@
-import { Socket, Subscribe } from "@express-di-kit/common";
+import { Socket, Subscribe } from "@express-di-kit/socket";
 import WebSocket from "ws";
 
 @Socket({ namespace: "/chat" })

@@ -3,10 +3,10 @@ import {
   Controller,
   Get,
   RateLimit,
-  React,
   Req,
 } from "@express-di-kit/common";
 
+import { React } from "@express-di-kit/static";
 import { IsAuthenticated } from "./jwt-middleware";
 import { UserService } from "./user.service";
 

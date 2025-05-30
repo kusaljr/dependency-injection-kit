@@ -11,7 +11,7 @@ This library provides a simple and flexible way to manage dependencies in your E
  Example:
 ```typescript
 // Example Controller
-import { Controller, Get } from 'express-di-kit';
+import { Controller, Get } from 'express-di-kit/common';
 @Controller('/example')
 export class ExampleController {
 
@@ -25,7 +25,7 @@ export class ExampleController {
 }
 
 // Example Service
-import { Injectable } from 'express-di-kit';
+import { Injectable } from 'express-di-kit/common';
 @Injectable()
 export class ExampleService {
   getData() {
@@ -40,7 +40,7 @@ export class ExampleService {
 
  Example:
 ```typescript
-import { useInterceptor } from 'express-di-kit';
+import { useInterceptor } from 'express-di-kit/common';
 
 export const MiddlewareFunction = () =>
   useInterceptor((req: Request, res: Response, next: NextFunction) => {
@@ -50,7 +50,7 @@ export const MiddlewareFunction = () =>
   });
 
 
-
+import { Controller, Get } from 'express-di-kit/common';
 @Controller('/example')
 export class ExampleController {
 
@@ -74,7 +74,8 @@ By using `@React()` decorator, you can render React components on the server and
 
 Example:
 ```typescript
-import { Controller, Get, React } from 'express-di-kit';
+import { Controller, Get } from 'express-di-kit/common';
+import {  React } from 'express-di-kit/static';
 
 @Controller('/example')
 export class ExampleController {
@@ -94,3 +95,24 @@ You can add client side packages by running the following command:
 npm run client ${packageName}
 ```
 This will generate a esm imports in `react-importmap.json` file and automatically added to final client bundle.
+
+
+## Websocket Integration
+ The library supports WebSocket integration, allowing you to create WebSocket handlers and inject dependencies into them.
+
+ Example:
+```typescript
+import { Socket, Subscribe } from 'express-di-kit/socket';
+
+@Socket('/example')
+export class ExampleSocket {
+
+  constructor(private exampleService: ExampleService) {}
+
+  @Subscribe('message')
+  async onMessage(data: any) {
+    return this.exampleService.processMessage(data);
+  }
+
+}
+```

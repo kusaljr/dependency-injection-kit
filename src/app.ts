@@ -15,9 +15,9 @@ async function bootstrap() {
       STRIPE_API_KEY: z.string().min(1, "STRIPE_API_KEY is required"),
     }),
 
-    asyncApiOptions: {
-      title: "Socket Documentation",
-    },
+    // asyncApiOptions: {
+    //   title: "Socket Documentation",
+    // },
   };
 
   try {
