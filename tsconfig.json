@@ -1,4 +1,7 @@
 {
+  "ts-node": {
+    "require": ["tsconfig-paths/register"]
+  },
   "compilerOptions": {
     "jsx": "react-jsx",
     "allowJs": true,
@@ -17,7 +20,11 @@
     "strict": true /* Enable all strict type-checking options. */,
 
     "skipLibCheck": true /* Skip type checking all .d.ts files. */,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": ".",
+    "paths": {
+      "@express-di-kit/*": ["lib/*"]
+    }
   },
   "include": [
     "src/**/*.ts",
