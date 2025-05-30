@@ -1,5 +1,5 @@
+import { AppConfig, createApp } from "@express-di-kit/common";
 import { z } from "zod";
-import { AppConfig, createApp } from "../lib/global/create_app";
 
 async function bootstrap() {
   const appConfig: AppConfig = {

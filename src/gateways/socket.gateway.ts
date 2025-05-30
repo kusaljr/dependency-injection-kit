@@ -1,5 +1,5 @@
+import { Socket, Subscribe } from "@express-di-kit/common";
 import WebSocket from "ws";
-import { Socket, Subscribe } from "../../lib/ops/socket/decorator";
 
 @Socket({ namespace: "/chat" })
 export class ChatGateway {

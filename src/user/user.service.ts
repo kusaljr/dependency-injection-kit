@@ -1,4 +1,4 @@
-import { Injectable } from "../../lib/decorators/injectable";
+import { Injectable } from "@express-di-kit/common";
 
 @Injectable()
 export class UserService {

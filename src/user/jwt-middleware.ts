@@ -1,5 +1,5 @@
+import { useInterceptor } from "@express-di-kit/common";
 import { NextFunction, Request, Response } from "express";
-import { useInterceptor } from "../../lib/decorators/middleware";
 
 export const IsAuthenticated = () =>
   useInterceptor((req: Request, res: Response, next: NextFunction) => {

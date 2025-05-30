@@ -1,7 +1,12 @@
-import { Controller, Get, Req } from "@express-di-kit/decorators/express";
-import { CircuitBreaker } from "@express-di-kit/ops/circuit-breaker/circuit-breaker";
-import { RateLimit } from "@express-di-kit/ops/rate-limit/rate-limit";
-import { React } from "@express-di-kit/ops/react/decorator";
+import {
+  CircuitBreaker,
+  Controller,
+  Get,
+  RateLimit,
+  React,
+  Req,
+} from "@express-di-kit/common";
+
 import { IsAuthenticated } from "./jwt-middleware";
 import { UserService } from "./user.service";
 
