@@ -1,21 +1,21 @@
 import {
+  Body,
   CircuitBreaker,
   Controller,
+  Delete,
   Get,
+  Patch,
+  Post,
   RateLimit,
   Req,
 } from "@express-di-kit/common";
 
 import { React } from "@express-di-kit/static";
 import { IsAuthenticated } from "./jwt-middleware";
+import { UserDto } from "./user.dto";
 import { UserService } from "./user.service";
 
 @Controller("/user")
-@RateLimit({
-  limit: 5,
-  windowMs: 30 * 1000,
-  errorMessage: "Too many requests, please try again later.",
-})
 @IsAuthenticated()
 export class UserController {
   constructor(private readonly userService: UserService) {}
@@ -31,6 +31,11 @@ export class UserController {
       });
     },
   })
+  @RateLimit({
+    limit: 5,
+    windowMs: 30 * 1000,
+    errorMessage: "Too many requests, please try again later.",
+  })
   getProfile() {
     return this.userService.getUserProfile();
   }
@@ -44,5 +49,21 @@ export class UserController {
         currentUser: req.user,
       },
     };
+  }
+
+  @Post("/create")
+  createUser(@Body() body: UserDto) {
+    console.log("Creating user with data:", body);
+    return "User created successfully!";
+  }
+
+  @Patch("/update")
+  updateUser() {
+    return "User updated successfully!";
+  }
+
+  @Delete("/delete")
+  deleteUser() {
+    return "User deleted successfully!";
   }
 }

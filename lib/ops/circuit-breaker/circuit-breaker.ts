@@ -30,14 +30,14 @@ export class CircuitBreakerClass<T = any> {
     this.enableLogging = enableLogging;
 
     this.log(
-      `Circuit breaker initialized. Threshold: ${this.failureThreshold}, Cooldown: ${this.cooldownTime}ms`
+      `\x1b[33mCircuit breaker initialized. Threshold: ${this.failureThreshold}, Cooldown: ${this.cooldownTime}ms\x1b[0m`
     );
   }
 
   public async execute(): Promise<T> {
     switch (this.status) {
       case CircuitBreakerStatus.OPEN:
-        this.log("Circuit is OPEN. Rejecting call.");
+        this.log("\x1b[31mCircuit is OPEN. Rejecting call.\x1b[0m");
         return this.executeFallback();
 
       case CircuitBreakerStatus.HALF_OPEN:
@@ -106,7 +106,13 @@ export class CircuitBreakerClass<T = any> {
 
   private log(message: string) {
     if (this.enableLogging) {
-      console.log(`[CircuitBreaker]: ${message}`);
+      if (this.status === CircuitBreakerStatus.OPEN) {
+        console.error(`\x1b[31m[CircuitBreaker]: ${message}\x1b[0m`);
+      } else if (this.status === CircuitBreakerStatus.HALF_OPEN) {
+        console.warn(`\x1b[33m[CircuitBreaker]: ${message}\x1b[0m`);
+      } else {
+        console.log(`\x1b[32m[CircuitBreaker]: ${message}\x1b[0m`);
+      }
     }
   }
 

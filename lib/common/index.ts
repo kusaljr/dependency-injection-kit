@@ -1,10 +1,12 @@
 export {
   ApiBearerAuth,
+  Body,
   Controller,
   Delete,
   Get,
   Patch,
   Post,
+  Property,
   Put,
   Req,
   Res,

@@ -10,6 +10,7 @@ import {
 import { Constructor, Container } from "../global/container";
 import { findControllerFiles } from "./find-controller";
 
+import { getZodSchemaForDto } from "@express-di-kit/validator/utils";
 import * as fs from "fs";
 import * as path from "path";
 import { REACT_METADATA } from "../ops/react/decorator";
@@ -180,7 +181,7 @@ export async function registerControllers(
                 Math.max(...parameters.map((p) => p.index + 1), 0)
               ).fill(undefined);
 
-              parameters.forEach((param) => {
+              for (const param of parameters) {
                 switch (param.type) {
                   case ParameterType.REQ:
                     args[param.index] = req;
@@ -189,22 +190,34 @@ export async function registerControllers(
                     args[param.index] = res;
                     break;
                   case ParameterType.PARAM:
-                    args[param.index] = (req.params as Record<string, any>)[
-                      param.name!
-                    ];
+                    args[param.index] = req.params[param.name!];
                     break;
                   case ParameterType.QUERY:
-                    args[param.index] = (req.query as Record<string, any>)[
-                      param.name!
-                    ];
+                    args[param.index] = req.query[param.name!];
                     break;
                   case ParameterType.BODY:
-                    args[param.index] = req.body;
+                    const ParamType = Reflect.getMetadata(
+                      "design:paramtypes",
+                      ControllerClass.prototype,
+                      route.handlerName
+                    )[param.index];
+
+                    const zodSchema = getZodSchemaForDto(ParamType);
+                    const parseResult = zodSchema.safeParse(req.body);
+
+                    if (!parseResult.success) {
+                      res
+                        .status(400)
+                        .json({ errors: parseResult.error.flatten() });
+                      return;
+                    }
+
+                    args[param.index] = parseResult.data;
                     break;
                   default:
                     break;
                 }
-              });
+              }
 
               try {
                 const result = await originalControllerMethod.apply(

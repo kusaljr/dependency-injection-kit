@@ -34,6 +34,34 @@ export class ExampleService {
 }
 ```
 
+### Validation
+ The library supports validation of request parameters, query strings, and body data using decorators. You can define validation rules using in built validators which uses `zod` under the hood.
+
+ Example:
+```typescript
+
+import {Property} from 'express-di-kit/common';
+import { IsString, IsNumber } from 'express-di-kit/validator';
+export class UserDto {
+  @Property()
+  @IsNumber()
+  age!: number;
+}
+
+
+import { Controller, Post } from 'express-di-kit/common';
+import { UserDto } from './user.dto';
+@Controller('/user')
+export class UserController {
+
+  @Post('/')
+  async createUser(@Property() user: UserDto) {
+    return { message: 'User created successfully!', user };
+  }
+
+}
+```
+
 
 ### Middleware Injection
  You can also inject services into your middleware functions. This allows you to use your services in your middleware logic without having to manually instantiate them.
