@@ -7,7 +7,6 @@ import {
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { Button } from "../../ui-components/button";
-// Extend the Window interface to include __PROPS__
 
 // Hook to grab props passed from server
 function useServerProps() {
