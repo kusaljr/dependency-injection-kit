@@ -6,6 +6,7 @@ import {
   Get,
   Patch,
   Post,
+  Put,
   RateLimit,
   Req,
 } from "@express-di-kit/common";
@@ -60,6 +61,12 @@ export class UserController {
   @Patch("/update")
   updateUser() {
     return "User updated successfully!";
+  }
+
+  @Put("/replace")
+  replaceUser(@Body() body: UserDto) {
+    console.log("Replacing user with data:", body);
+    return "User replaced successfully!";
   }
 
   @Delete("/delete")

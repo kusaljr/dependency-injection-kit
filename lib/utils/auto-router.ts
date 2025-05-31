@@ -33,6 +33,17 @@ const colorText = {
   cyan: (text: string) => `\x1b[36m${text}\x1b[0m`,
   magenta: (text: string) => `\x1b[35m${text}\x1b[0m`,
   white: (text: string) => `\x1b[37m${text}\x1b[0m`,
+  bold: (text: string) => `\x1b[1m${text}\x1b[0m`,
+  underline: (text: string) => `\x1b[4m${text}\x1b[0m`,
+  inverse: (text: string) => `\x1b[7m${text}\x1b[0m`,
+  strikethrough: (text: string) => `\x1b[9m${text}\x1b[0m`,
+  gray: (text: string) => `\x1b[90m${text}\x1b[0m`,
+  black: (text: string) => `\x1b[30m${text}\x1b[0m`,
+  bgGreen: (text: string) => `\x1b[42m${text}\x1b[0m`,
+  bgRed: (text: string) => `\x1b[41m${text}\x1b[0m`,
+  bgYellow: (text: string) => `\x1b[43m${text}\x1b[0m`,
+  bgBlue: (text: string) => `\x1b[44m${text}\x1b[0m`,
+  bgCyan: (text: string) => `\x1b[46m${text}\x1b[0m`,
 };
 
 const colorMethod = (method: string): string => {
@@ -40,11 +51,13 @@ const colorMethod = (method: string): string => {
     case "GET":
       return colorText.green(method.toUpperCase());
     case "POST":
-      return colorText.orange(method.toUpperCase());
+      return colorText.cyan(method.toUpperCase());
     case "PATCH":
-      return colorText.yellow(method.toUpperCase());
+      return colorText.magenta(method.toUpperCase());
     case "DELETE":
       return colorText.red(method.toUpperCase());
+    case "PUT":
+      return colorText.yellow(method.toUpperCase());
     default:
       return colorText.white(method.toUpperCase());
   }
@@ -203,12 +216,14 @@ export async function registerControllers(
                     )[param.index];
 
                     const zodSchema = getZodSchemaForDto(ParamType);
+
                     const parseResult = zodSchema.safeParse(req.body);
 
                     if (!parseResult.success) {
-                      res
-                        .status(400)
-                        .json({ errors: parseResult.error.flatten() });
+                      res.status(422).json({
+                        message: "Validation failed",
+                        errors: parseResult.error.flatten().fieldErrors,
+                      });
                       return;
                     }
 

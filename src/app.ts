@@ -23,7 +23,9 @@ async function bootstrap() {
   try {
     const app = await createApp(appConfig);
     app.listen(appConfig.port, () => {
-      console.log(`Server running on http://localhost:${appConfig.port}`);
+      console.log(
+        `\x1b[32m✅ Server running at:\x1b[0m \x1b[36mhttp://localhost:${appConfig.port}\x1b[0m`
+      );
     });
   } catch (error) {
     console.error("Error during application bootstrap:", error);
