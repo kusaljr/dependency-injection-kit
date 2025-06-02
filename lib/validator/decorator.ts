@@ -1,6 +1,3 @@
-// constants.ts
-
-// decorators.ts (your file)
 import "reflect-metadata";
 import { z, ZodTypeAny } from "zod";
 import { ZOD_SCHEMA_KEY } from "./constants";
