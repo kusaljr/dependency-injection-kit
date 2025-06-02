@@ -1,4 +1,4 @@
-import { Application, NextFunction, Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
 import {
   HttpMethod,
   InterceptorFunction,
@@ -6,10 +6,11 @@ import {
   ParameterDefinition,
   ParameterType,
   RouteDefinition,
-} from "../decorators/express";
+} from "../decorators/router";
 import { Constructor, Container } from "../global/container";
 import { findControllerFiles } from "./find-controller";
 
+import { BunServe } from "@express-di-kit/bun-engine/exp";
 import { getZodSchemaForDto } from "@express-di-kit/validator/utils";
 import * as fs from "fs";
 import * as path from "path";
@@ -86,7 +87,7 @@ function findGatewayFiles(dir: string): string[] {
 }
 
 export async function registerControllers(
-  app: Application,
+  app: BunServe,
   controllersDir: string,
   container: Container,
   websocketPort = 3001
@@ -268,8 +269,8 @@ export async function registerControllers(
               }
             };
 
-            app[route.method as keyof Application](
-              prefix + route.path,
+            app[route.method as keyof BunServe](
+              (prefix + route.path) as any,
               ...[...controllerInterceptors, ...methodInterceptors].map(
                 wrapMiddleware
               ),

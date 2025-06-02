@@ -2,7 +2,7 @@ import {
   ParameterDefinition,
   ParameterType,
   RouteDefinition,
-} from "../decorators/express";
+} from "../decorators/router";
 import { Constructor } from "../global/container";
 import { findControllerFiles } from "./find-controller";
 

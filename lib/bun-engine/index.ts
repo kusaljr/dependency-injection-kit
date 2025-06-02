@@ -1,452 +1,862 @@
-import { type Server } from "bun";
+import type { Server, ServerWebSocket } from "bun";
 
-type RequestMethodType =
-  | "GET"
-  | "PUT"
-  | "POST"
-  | "DELETE"
-  | "PATCH"
-  | "OPTIONS"
-  | "HEAD";
+enum SystemErrCode {
+  FILE_NOT_FOUND = "FILE_NOT_FOUND",
+  BODY_PARSING_FAILED = "BODY_PARSING_FAILED",
+  ROUTE_ALREADY_REGISTERED = "ROUTE_ALREADY_REGISTERED",
+  ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND",
+  INTERNAL_SERVER_ERR = "INTERNAL SERVER ERROR",
+  WEBSOCKET_UPGRADE_FAILURE = "WEBSOCKET UPGRADE FAILURE",
+}
 
-interface BunRequest {
-  method: RequestMethodType;
-  params: { [key: string]: string };
+class SystemErr extends Error {
+  typeOf: SystemErrCode;
+  constructor(typeOf: SystemErrCode, message: string) {
+    super(`${typeOf}: ${message}`);
+    this.typeOf = typeOf;
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, SystemErr);
+    }
+  }
+}
+
+const SystemErrRecord: Record<SystemErrCode, HTTPHandlerFunc> = {
+  [SystemErrCode.FILE_NOT_FOUND]: async (c: HTTPContext) => {
+    let err = c.getErr() as SystemErr;
+    return c.setStatus(404).text(err.message);
+  },
+  [SystemErrCode.BODY_PARSING_FAILED]: async (c: HTTPContext) => {
+    let err = c.getErr() as SystemErr;
+    return c.setStatus(400).text(err.message);
+  },
+  [SystemErrCode.ROUTE_ALREADY_REGISTERED]: async (c: HTTPContext) => {
+    let err = c.getErr() as SystemErr;
+    return c.setStatus(409).text(err.message);
+  },
+  [SystemErrCode.ROUTE_NOT_FOUND]: async (c: HTTPContext) => {
+    let err = c.getErr() as SystemErr;
+    return c.setStatus(404).text(err.message);
+  },
+  [SystemErrCode.INTERNAL_SERVER_ERR]: async (c: HTTPContext) => {
+    let err = c.getErr() as SystemErr;
+    return c
+      .setStatus(500)
+      .text(
+        "DiKit Internal Server Error\n\nTo Make You App Safe For Production\nSetup Your Own Error Handling:\n\napp.onErr(async (c: HTTPContext): Promise<Response> => {\n\tlet err = c.getErr()\n\tconsole.error(err)\n\treturn c.setStatus(500).text('Internal Server Error')\n})\n\nError Message:\n" +
+          err.message
+      );
+  },
+  [SystemErrCode.WEBSOCKET_UPGRADE_FAILURE]: async (c: HTTPContext) => {
+    let err = c.getErr() as SystemErr;
+    return c.setStatus(500).text(err.message);
+  },
+};
+
+//==============================
+// cookies
+//==============================
+
+export interface CookieOptions {
+  path?: string;
+  domain?: string;
+  maxAge?: number;
+  expires?: Date;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "Strict" | "Lax" | "None";
+}
+
+//==============================
+// ws context
+//==============================
+
+export class WSContext {
+  headers?: HeadersInit;
+  data: Record<string, any>;
+  constructor(req: Request, path: string) {
+    this.data = {
+      req,
+      path,
+    };
+  }
+  get(key: string) {
+    return this.data[key];
+  }
+  set(key: string, value: any) {
+    this.data[key] = value;
+  }
+}
+
+//==============================
+// http context
+//==============================
+
+export enum BodyType {
+  JSON = "json",
+  TEXT = "string",
+  FORM = "form",
+  MULTIPART_FORM = "multipart_form",
+}
+
+export class HTTPContext {
+  req: Request;
+  res: MutResponse;
+  url: URL;
   path: string;
-  body: unknown;
-  query: { [key: string]: string };
-  originalUrl: string;
-  headers: { [key: string]: string | string[] };
-}
+  method: string;
+  route: string;
+  segments: string[];
+  params: Record<string, string>;
+  private _body?: string | Record<string, any> | FormData;
+  storeData: Record<string, string>;
+  private err: Error | undefined | string;
 
-interface Handler {
-  (req: BunRequest, res: BunResponse): void | Promise<void>;
-}
-type Middlewares = Handler[];
-interface Route {
-  handler: Handler;
-  middlewareFuncs?: Middlewares;
-}
-
-class Chain {
-  private req: BunRequest;
-  private res: BunResponse;
-  private middlewares: Middlewares;
-  private resolve!: () => void;
-  private index: number = 0;
-
-  constructor(req: BunRequest, res: BunResponse, middlewares: Middlewares) {
+  constructor(req: Request, params: Record<string, string> = {}) {
     this.req = req;
-    this.res = res;
+    this.res = new MutResponse();
+    this.url = new URL(this.req.url);
+    this.path = this.url.pathname.replace(/\/+$/, "") || "/";
+    this.method = this.req.method;
+    this.route = `${this.method} ${this.path}`;
+    this.segments = this.path.split("/").filter(Boolean);
+    this.params = params;
+    this.storeData = {};
+  }
+
+  setErr(err: Error | undefined | string) {
+    this.err = err;
+  }
+
+  getErr(): Error | undefined | string {
+    return this.err;
+  }
+
+  redirect(location: string, status: number = 302): Response {
+    this.res.setStatus(status);
+    this.res.setHeader("Location", location);
+    return this.res.send();
+  }
+
+  async parseBody<T extends BodyType>(
+    expectedType: T
+  ): Promise<
+    T extends BodyType.JSON
+      ? Record<string, any>
+      : T extends BodyType.TEXT
+      ? string
+      : T extends BodyType.FORM
+      ? Record<string, string>
+      : T extends BodyType.MULTIPART_FORM
+      ? FormData
+      : never
+  > {
+    if (this._body !== undefined) {
+      return this._body as any;
+    }
+
+    const contentType = this.req.headers.get("Content-Type") || "";
+
+    let parsedData: any;
+
+    if (contentType.includes("application/json")) {
+      if (expectedType !== BodyType.JSON) {
+        throw new SystemErr(
+          SystemErrCode.BODY_PARSING_FAILED,
+          "Unexpected JSON data"
+        );
+      }
+      try {
+        parsedData = await this.req.json();
+      } catch (err: any) {
+        throw new SystemErr(
+          SystemErrCode.BODY_PARSING_FAILED,
+          `JSON parsing failed: ${err.message}`
+        );
+      }
+    } else if (contentType.includes("application/x-www-form-urlencoded")) {
+      if (expectedType !== BodyType.FORM) {
+        throw new SystemErr(
+          SystemErrCode.BODY_PARSING_FAILED,
+          "Unexpected FORM data"
+        );
+      }
+      parsedData = Object.fromEntries(
+        new URLSearchParams(await this.req.text())
+      );
+    } else if (contentType.includes("multipart/form-data")) {
+      if (expectedType !== BodyType.MULTIPART_FORM) {
+        throw new SystemErr(
+          SystemErrCode.BODY_PARSING_FAILED,
+          "Unexpected MULTIPART_FORM data"
+        );
+      }
+      parsedData = await this.req.formData();
+    } else {
+      if (expectedType !== BodyType.TEXT) {
+        throw new SystemErr(
+          SystemErrCode.BODY_PARSING_FAILED,
+          "Unexpected TEXT data"
+        );
+      }
+      parsedData = await this.req.text();
+    }
+
+    this._body = parsedData;
+    return parsedData;
+  }
+
+  getParam(name: string, defaultValue?: string): string | undefined {
+    return this.params[name] ?? defaultValue;
+  }
+
+  setStatus(code: number): this {
+    this.res.setStatus(code);
+    return this;
+  }
+
+  setHeader(name: string, value: string): this {
+    this.res.setHeader(name, value);
+    return this;
+  }
+
+  getHeader(name: string): string | null {
+    return this.req.headers.get(name);
+  }
+
+  private send(content: string): Response {
+    return this.res.body(content).send();
+  }
+
+  html(content: string): Response {
+    this.setHeader("Content-Type", "text/html");
+    return this.send(content);
+  }
+
+  text(content: string): Response {
+    this.setHeader("Content-Type", "text/plain");
+    return this.send(content);
+  }
+
+  json(data: any): Response {
+    this.setHeader("Content-Type", "application/json");
+    return this.send(JSON.stringify(data));
+  }
+
+  async stream(stream: ReadableStream): Promise<Response> {
+    this.setHeader("Content-Type", "application/octet-stream");
+    return new Response(stream, {
+      status: this.res.statusCode,
+      headers: this.res.headers,
+    });
+  }
+
+  async file(path: string, stream = false): Promise<Response> {
+    let file = Bun.file(path);
+    let exists = await file.exists();
+    if (!exists) {
+      throw new SystemErr(
+        SystemErrCode.FILE_NOT_FOUND,
+        `file does not exist at ${path}`
+      );
+    }
+    this.res.setHeader("Content-Type", file.type || "application/octet-stream");
+    return stream
+      ? new Response(file.stream(), {
+          status: this.res.statusCode,
+          headers: this.res.headers,
+        })
+      : new Response(file, {
+          status: this.res.statusCode,
+          headers: this.res.headers,
+        });
+  }
+
+  setStore(key: string, value: any): void {
+    this.storeData[key] = value;
+  }
+
+  getStore(key: string): any {
+    return this.storeData[key] || undefined;
+  }
+
+  query(name: string, defaultValue: string = ""): string {
+    return this.url.searchParams.get(name) ?? defaultValue;
+  }
+
+  getCookie(name: string): string | undefined {
+    const cookies = this.req.headers.get("Cookie");
+    if (!cookies) return undefined;
+    return cookies
+      .split("; ")
+      .map((c) => c.split(/=(.*)/s, 2)) // Preserve `=` inside values
+      .reduce<Record<string, string>>((acc, [key, val]) => {
+        acc[key] = val;
+        return acc;
+      }, {})[name];
+  }
+
+  setCookie(name: string, value: string, options: CookieOptions = {}) {
+    let cookieString = `${name}=${encodeURIComponent(value)}`;
+    options.path ??= "/";
+    options.httpOnly ??= true;
+    options.secure ??= true;
+    options.sameSite ??= "Lax";
+    if (options.domain) cookieString += `; Domain=${options.domain}`;
+    if (options.maxAge !== undefined) {
+      cookieString += `; Max-Age=${options.maxAge}`;
+    }
+    if (options.expires) {
+      cookieString += `; Expires=${options.expires.toUTCString()}`;
+    }
+    if (options.httpOnly) cookieString += `; HttpOnly`;
+    if (options.secure) cookieString += `; Secure`;
+    if (options.sameSite) cookieString += `; SameSite=${options.sameSite}`;
+    this.res.headers.append("Set-Cookie", cookieString);
+  }
+
+  clearCookie(name: string, path: string = "/", domain?: string): void {
+    this.setCookie(name, "", {
+      path,
+      domain,
+      maxAge: 0,
+      expires: new Date(0), // Ensure proper removal
+    });
+  }
+}
+
+//==============================
+// web socket handler
+//==============================
+
+export type WSOpenFunc = (ws: ServerWebSocket<unknown>) => Promise<void>;
+export type WSMessageFunc = (
+  ws: ServerWebSocket<unknown>,
+  message: string | Buffer<ArrayBufferLike>
+) => Promise<void>;
+export type WSCloseFunc = (
+  ws: ServerWebSocket<unknown>,
+  code: number,
+  message: string
+) => Promise<void>;
+export type WSDrainFunc = (ws: ServerWebSocket<unknown>) => Promise<void>;
+export type WSOnConnect = (c: WSContext) => Promise<void>;
+
+//==============================
+// handler
+//==============================
+
+type HTTPHandlerFunc = (c: HTTPContext) => Promise<Response>;
+
+export class HTTPHandler {
+  private mainHandler: HTTPHandlerFunc;
+  private middlewares: Middleware[];
+  private compiledChain: (c: HTTPContext) => Promise<Response>;
+
+  constructor(mainHandler: HTTPHandlerFunc) {
+    this.mainHandler = mainHandler;
+    this.middlewares = [];
+    this.compiledChain = async (c: HTTPContext) => await this.mainHandler(c); // Default
+  }
+
+  setMiddlewares(middlewares: Middleware[]) {
+    this.middlewares = middlewares;
+    this.precompileChain();
+  }
+
+  private precompileChain() {
+    let chain = async (context: HTTPContext): Promise<Response> => {
+      try {
+        return await this.mainHandler(context);
+      } catch (error) {
+        throw error; // Ensure error propagates
+      }
+    };
+
+    // Apply middlewares in reverse order
+    for (let i = this.middlewares.length - 1; i >= 0; i--) {
+      const middleware = this.middlewares[i];
+      const nextChain = chain;
+      chain = async (context: HTTPContext): Promise<Response> => {
+        try {
+          let finalResponse: Response | undefined;
+
+          const result = await middleware.execute(context, async () => {
+            const response = await nextChain(context);
+            finalResponse = response;
+            return response;
+          });
+
+          return result instanceof Response
+            ? result
+            : finalResponse ||
+                new Response("no response generated", { status: 500 });
+        } catch (error) {
+          throw error;
+        }
+      };
+    }
+
+    this.compiledChain = chain;
+  }
+
+  async execute(c: HTTPContext): Promise<Response> {
+    return this.compiledChain(c);
+  }
+}
+
+//==============================
+// middleware
+//==============================
+
+export type MiddlewareNextFn = () => Promise<void | Response>;
+
+export type MiddlewareFn = (
+  c: HTTPContext,
+  next: MiddlewareNextFn
+) => Promise<void | Response>;
+
+export class Middleware {
+  private callback: MiddlewareFn;
+
+  constructor(callback: MiddlewareFn) {
+    this.callback = callback;
+  }
+
+  async execute(
+    c: HTTPContext,
+    next: () => Promise<void | Response>
+  ): Promise<void | Response> {
+    return this.callback(c, next);
+  }
+}
+
+export const logger = new Middleware(async (c: HTTPContext, next) => {
+  const start = performance.now();
+  await next();
+  const duration = performance.now() - start;
+  console.log(`[${c.req.method}][${c.path}][${duration.toFixed(2)}ms]`);
+});
+
+//=================================
+// response
+//=================================
+
+export class MutResponse {
+  statusCode: number;
+  headers: Headers;
+  bodyContent: string;
+
+  constructor() {
+    this.statusCode = 200;
+    this.headers = new Headers();
+    this.bodyContent = "";
+  }
+
+  setStatus(code: number): this {
+    this.statusCode = code;
+    return this;
+  }
+
+  setHeader(name: string, value: string): this {
+    this.headers.set(name, value);
+    return this;
+  }
+
+  getHeader(name: string): string {
+    return this.headers.get(name) || "";
+  }
+
+  body(content: string | object): this {
+    this.bodyContent =
+      typeof content === "object" ? JSON.stringify(content) : content;
+    return this;
+  }
+
+  send(): Response {
+    return new Response(this.bodyContent, {
+      status: this.statusCode,
+      headers: this.headers,
+    });
+  }
+
+  json(data: any): this {
+    this.setHeader("Content-Type", "application/json");
+    this.body(JSON.stringify(data));
+    return this;
+  }
+}
+
+//==============================
+// router
+//==============================
+
+class TrieNode {
+  handlers: Record<string, HTTPHandler> = {};
+  children: Record<string, TrieNode> = {};
+  paramKey?: string;
+  wildcard?: TrieNode;
+}
+
+export class RouteGroup {
+  app: DiKit;
+  prefixPath: string;
+  middlewares: Middleware[];
+  constructor(app: DiKit, prefixPath: string, ...middlewares: Middleware[]) {
+    this.app = app;
+    this.prefixPath = prefixPath;
     this.middlewares = middlewares;
   }
 
-  private async processNext(err?: Error): Promise<void> {
-    if (err) {
-      // You can handle errors differently here if desired
+  get(path: string, handler: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    this.app.get(
+      this.prefixPath + path,
+      handler,
+      ...this.middlewares.concat(middlewares)
+    );
+    return this;
+  }
+  post(path: string, handler: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    this.app.post(
+      this.prefixPath + path,
+      handler,
+      ...this.middlewares.concat(middlewares)
+    );
+    return this;
+  }
+  put(path: string, handler: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    this.app.put(
+      this.prefixPath + path,
+      handler,
+      ...this.middlewares.concat(middlewares)
+    );
+    return this;
+  }
+  delete(path: string, handler: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    this.app.delete(
+      this.prefixPath + path,
+      handler,
+      ...this.middlewares.concat(middlewares)
+    );
+    return this;
+  }
+  patch(path: string, handler: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    this.app.patch(
+      this.prefixPath + path,
+      handler,
+      ...this.middlewares.concat(middlewares)
+    );
+    return this;
+  }
+}
+
+export class DiKit {
+  DEBUG_MODE = false;
+  private root: TrieNode = new TrieNode();
+  private routes: Record<string, HTTPHandler> = {}; // Replacing Map with object
+  private globalMiddlewares: Middleware[] = [];
+  private notFoundHandler?: HTTPHandler;
+  private errHandler?: HTTPHandler;
+  private resolvedRoutes = new Map<
+    string,
+    { handler?: HTTPHandler; params: Record<string, string> }
+  >();
+  private readonly MAX_CACHE_SIZE = 100;
+  private wsOpenRoutes: Record<string, WSOpenFunc> = {};
+  private wsMessageRoutes: Record<string, WSMessageFunc> = {};
+  private wsCloseRoutes: Record<string, WSCloseFunc> = {};
+  private wsDrainRoutes: Record<string, WSDrainFunc> = {};
+  private wsOnConnects: Record<string, WSOnConnect> = {};
+  private wsRoutes: Record<string, boolean> = {};
+
+  ws(
+    path: string,
+    handlers: {
+      open?: WSOpenFunc;
+      message?: WSMessageFunc;
+      close?: WSCloseFunc;
+      drain?: WSDrainFunc;
+      onConnect?: WSOnConnect;
+    }
+  ) {
+    this.wsRoutes[path] = true;
+    if (handlers.open) this.wsOpenRoutes[path] = handlers.open;
+    if (handlers.message) this.wsMessageRoutes[path] = handlers.message;
+    if (handlers.close) this.wsCloseRoutes[path] = handlers.close;
+    if (handlers.drain) this.wsDrainRoutes[path] = handlers.drain;
+    if (handlers.onConnect) this.wsOnConnects[path] = handlers.onConnect;
+  }
+
+  use(...middlewares: Middleware[]) {
+    this.globalMiddlewares.push(...middlewares);
+  }
+
+  group(prefixPath: string, ...middlewares: Middleware[]) {
+    return new RouteGroup(this, prefixPath, ...middlewares);
+  }
+
+  onErr(handlerFunc: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    let handler = new HTTPHandler(handlerFunc);
+    handler.setMiddlewares(this.globalMiddlewares.concat(middlewares));
+    this.errHandler = handler;
+  }
+
+  onNotFound(handlerFunc: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    let handler = new HTTPHandler(handlerFunc);
+    handler.setMiddlewares(this.globalMiddlewares.concat(middlewares));
+    this.notFoundHandler = handler;
+  }
+
+  private register(
+    method: string,
+    path: string,
+    handlerFunc: HTTPHandlerFunc,
+    middlewares: Middleware[]
+  ) {
+    try {
+      let handler = new HTTPHandler(handlerFunc);
+      handler.setMiddlewares(this.globalMiddlewares.concat(middlewares));
+
+      if (!path.includes(":") && !path.includes("*")) {
+        if (this.routes[`${method} ${path}`]) {
+          throw new SystemErr(
+            SystemErrCode.ROUTE_ALREADY_REGISTERED,
+            `Route ${method} ${path} has already been registered`
+          );
+        }
+        this.routes[`${method} ${path}`] = handler;
+        return;
+      }
+
+      const parts = path.split("/").filter(Boolean);
+      let node = this.root;
+
+      for (const part of parts) {
+        let isParam = part.startsWith(":");
+        let isWildcard = part === "*";
+
+        if (isParam) {
+          node =
+            node.children[":param"] ??
+            (node.children[":param"] = new TrieNode());
+          node.paramKey ||= part.slice(1);
+        } else if (isWildcard) {
+          node.wildcard = node.wildcard ?? new TrieNode();
+          node = node.wildcard;
+        } else {
+          node = node.children[part] ?? (node.children[part] = new TrieNode());
+        }
+      }
+
+      if (node.handlers[method]) {
+        throw new SystemErr(
+          SystemErrCode.ROUTE_ALREADY_REGISTERED,
+          `Route ${method} ${path} has already been registered`
+        );
+      }
+      node.handlers[method] = handler;
+    } catch (err) {
       throw err;
     }
-
-    if (this.index < this.middlewares.length) {
-      const middleware = this.middlewares[this.index++];
-      let called = false;
-
-      const next = async (error?: Error) => {
-        if (called) return;
-        called = true;
-        await this.processNext(error);
-      };
-
-      try {
-        if (!middleware) {
-          throw new Error("Middleware function is undefined");
-        }
-
-        await middleware(this.req, this.res, next);
-        if (!called) {
-          // Middleware didn't call next; we resolve
-          this.resolve();
-        }
-      } catch (e) {
-        await this.processNext(e instanceof Error ? e : new Error(String(e)));
-      }
-    } else {
-      this.resolve();
-    }
   }
 
-  public run(): Promise<void> {
-    return new Promise<void>((resolve) => {
-      this.resolve = resolve;
-      this.processNext(); // no need to await here, it's handled inside
-    });
-  }
-
-  public isFinish(): boolean {
-    return this.index >= this.middlewares.length;
-  }
-
-  public isReady(): boolean {
-    return !this.isFinish();
-  }
-}
-
-class TrieTree {
-  private root: Node;
-  constructor() {
-    this.root = new Node();
-  }
-
-  get(path: string): {
-    routeParams: { [key: string]: string };
-    node: Node | null;
-  } {
-    const paths = path.split("/");
-    const node = this.root;
-    const params = {};
-    return {
-      routeParams: params,
-      node: this.dig(node, paths, params),
-    };
-  }
-
-  insert(path: string, value: Route) {
-    if (path === "*") {
-      path = "/";
-    }
-    const paths = path.split("/");
-    let node = this.root;
-    let index = 0;
-
-    while (index < paths.length) {
-      const children = node.getChildren();
-      const currentPath = paths[index];
-      let target = children.find((e) => e.getPath() === currentPath);
-
-      if (!target) {
-        target = new Node(currentPath);
-        children.push(target);
-      }
-
-      node = target;
-      index++;
-    }
-
-    node.insertChild(value);
-  }
-
-  dig(
-    node: Node,
-    paths: string[],
-    params: { [key: string]: string }
-  ): Node | null {
-    if (paths.length === 0) {
-      return node;
-    }
-
-    const target = node
-      .getChildren()
-      .filter((e) => e.getPath() === paths[0] || e.getPath().includes(":"));
-
-    if (target.length === 0) {
-      return null;
-    }
-
-    let next = null;
-
-    for (let i = 0; i < target.length; ++i) {
-      const e = target[i];
-      if (e && e.getPath().startsWith(":")) {
-        const key = e.getPath().replace(":", "");
-        // params[key] = paths[0];
-        const path = paths[0];
-        if (!path) {
-          return null;
-        }
-        params[key] = path;
-      }
-
-      paths.shift();
-      if (e) {
-        next = this.dig(e, paths, params);
-        if (next) {
-          return next;
-        }
-      }
-    }
-
-    return next;
-  }
-}
-
-class Node {
-  private path: string;
-  private handlers?: Route;
-  private children: Node[];
-
-  constructor(path: string = "") {
-    this.path = path;
-    this.handlers = undefined;
-    this.children = [];
-  }
-
-  insertChild(handlers: Route) {
-    this.handlers = handlers;
-  }
-
-  getChildren() {
-    return this.children;
-  }
-
-  getHandler() {
-    return this.handlers?.handler;
-  }
-
-  getMiddlewares() {
-    return this.handlers?.middlewareFuncs || [];
-  }
-
-  getPath() {
-    return this.path;
-  }
-}
-
-class BunResponse {
-  public response: Response | undefined;
-  private options: ResponseInit = {};
-
-  status(code: number): BunResponse {
-    this.options = { ...this.options, status: code };
+  get(path: string, handler: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    this.register("GET", path, handler, middlewares);
     return this;
   }
 
-  statusText(text: string): BunResponse {
-    this.options = { ...this.options, statusText: text };
+  post(path: string, handler: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    this.register("POST", path, handler, middlewares);
     return this;
   }
 
-  json(body: any): void {
-    this.response = Response.json(body, this.options);
+  put(path: string, handler: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    this.register("PUT", path, handler, middlewares);
+    return this;
   }
 
-  getResponse(): Response {
-    if (!this.response) {
-      throw new Error("Response is not set. Use json() or send() first.");
-    }
-    return this.response;
-  }
-  send(body: string | Record<string, any>): void {
-    if (typeof body === "string") {
-      this.response = new Response(body, this.options);
-    } else {
-      this.response = Response.json(body, this.options);
-    }
-  }
-}
-
-class BunServer {
-  private static server?: BunServer;
-  private requestMap: { [method: string]: TrieTree } = {};
-  private readonly middlewares: Middlewares = [];
-  constructor() {
-    if (BunServer.server) {
-      throw new Error(
-        "DONT use this constructor to create bun server, try Server()"
-      );
-    }
-    BunServer.server = this;
+  delete(path: string, handler: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    this.register("DELETE", path, handler, middlewares);
+    return this;
   }
 
-  get(path: string, ...handlers: Handler[]) {
-    this.delegate(path, "GET", handlers);
+  patch(path: string, handler: HTTPHandlerFunc, ...middlewares: Middleware[]) {
+    this.register("PATCH", path, handler, middlewares);
+    return this;
   }
 
-  put(path: string, ...handlers: Handler[]) {
-    this.delegate(path, "PUT", handlers);
-  }
+  find(
+    method: string,
+    path: string
+  ): { handler?: HTTPHandler; params: Record<string, string> } {
+    const cacheKey = `${method} ${path}`;
 
-  post(path: string, ...handlers: Handler[]) {
-    this.delegate(path, "POST", handlers);
-  }
-
-  patch(path: string, ...handlers: Handler[]) {
-    this.delegate(path, "PATCH", handlers);
-  }
-
-  delete(path: string, ...handlers: Handler[]) {
-    this.delegate(path, "DELETE", handlers);
-  }
-
-  options(path: string, ...handlers: Handler[]) {
-    this.delegate(path, "OPTIONS", handlers);
-  }
-
-  head(path: string, ...handlers: Handler[]) {
-    this.delegate(path, "HEAD", handlers);
-  }
-
-  private submitToMap(
-    method: RequestMethodType,
-    path: string,
-    handler: Handler,
-    middlewares: Middlewares = []
-  ) {
-    let targetTree = this.requestMap[method];
-    if (!targetTree) {
-      this.requestMap[method] = new TrieTree();
-      targetTree = this.requestMap[method];
-    }
-    const route = {
-      handler: handler,
-      middlewareFuncs: middlewares,
-    };
-    targetTree.insert(path, route);
-  }
-
-  private delegate(
-    path: string,
-    method: RequestMethodType,
-    handlers: Handler[]
-  ) {
-    let key = path;
-    if (key === "/") {
-      key = "";
-    }
-    if (handlers.length < 1) return;
-
-    const middlewares = handlers.slice(0, -1);
-    const handler = handlers[handlers.length - 1];
-
-    if (!handler) {
-      throw new Error(`No handler provided for ${method} ${path}`);
+    if (this.routes[cacheKey]) {
+      return { handler: this.routes[cacheKey], params: {} };
     }
 
-    this.submitToMap(method, path, handler, middlewares);
+    const cached = this.resolvedRoutes.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const parts = path.split("/").filter(Boolean);
+    let node: TrieNode = this.root;
+    let params: Record<string, string> = {};
+
+    for (const part of parts) {
+      let exactMatch: TrieNode | undefined = node.children[part];
+      let paramMatch: TrieNode | undefined = node.children[":param"];
+      let wildcardMatch: TrieNode | undefined = node.wildcard;
+
+      if (exactMatch) {
+        node = exactMatch;
+      } else if (paramMatch) {
+        node = paramMatch;
+        if (node.paramKey) {
+          params[node.paramKey] = part;
+        }
+      } else if (wildcardMatch) {
+        node = wildcardMatch;
+        break;
+      } else {
+        return { handler: undefined, params: {} };
+      }
+    }
+
+    const matchedHandler: HTTPHandler | undefined = node.handlers[method];
+    if (!matchedHandler) {
+      return { handler: undefined, params: {} };
+    }
+
+    if (this.resolvedRoutes.size >= this.MAX_CACHE_SIZE) {
+      const oldestKey = this.resolvedRoutes.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.resolvedRoutes.delete(oldestKey);
+      }
+    }
+
+    const result = { handler: matchedHandler, params };
+    this.resolvedRoutes.set(cacheKey, result);
+    return result;
   }
 
-  listen(port: number) {
-    console.log(`Bun server is listening on port ${port}`);
-    return this.openServer(port);
-  }
+  async handleHTTP(req: Request, server: Server): Promise<Response | void> {
+    const url = new URL(req.url);
+    const path = url.pathname;
+    const method = req.method;
 
-  private async bunRequest(req: Request) {
-    const { searchParams, pathname } = new URL(req.url);
-    const newRequest = {
-      method: req.method as RequestMethodType,
-      path: pathname,
-      body: null as unknown,
-      query: {} as { [key: string]: string },
-      originalUrl: req.url,
-      params: {} as { [key: string]: string },
-      headers: {} as { [key: string]: string | string[] },
-    };
-
-    searchParams.forEach((value, key) => {
-      newRequest.query[key] = value;
-    });
-
-    const bodyStr = await req.text();
+    // determine if a ws path has been hit
+    if (this.wsRoutes[path]) {
+      return await this.handleWS(req, server, path);
+    }
 
     try {
-      newRequest.body = JSON.parse(bodyStr);
-    } catch (err) {
-      newRequest.body = bodyStr;
+      const { handler, params } = this.find(method, path);
+      if (handler) {
+        const context = new HTTPContext(req, params);
+        return await handler.execute(context);
+      }
+      if (this.notFoundHandler) {
+        return this.notFoundHandler.execute(new HTTPContext(req));
+      }
+      throw new SystemErr(
+        SystemErrCode.ROUTE_NOT_FOUND,
+        `${method} ${path} is not registered`
+      );
+    } catch (e: any) {
+      // setting up our context with an error
+      let c = new HTTPContext(req);
+      c.setErr(e);
+
+      // catching all system-level errors (errors that can occur within functions provided by DiKit)
+      if (e instanceof SystemErr) {
+        let errHandler = await SystemErrRecord[e.typeOf];
+        return await errHandler(c);
+      }
+
+      // if the user has default error handling
+      if (this.errHandler) {
+        return this.errHandler.execute(c);
+      }
+
+      // if the user does not have an error handler setup, then send a default message
+      return await SystemErrRecord[SystemErrCode.INTERNAL_SERVER_ERR](c);
     }
-
-    req.headers.forEach((value, key) => {
-      newRequest.headers = newRequest.headers || {};
-      newRequest.headers[key] = value;
-    });
-
-    return newRequest;
   }
 
-  private responseProxy() {
-    const response = new BunResponse();
-    return new Proxy(response, {
-      get(target, prop, receiver) {
-        const value = Reflect.get(target, prop, receiver);
-        if (
-          typeof value === "function" &&
-          (prop === "json" || prop === "send")
-        ) {
-          if (target.response) {
-            throw new Error("You cannot send response twice");
-          }
-          return (...args: any[]) => {
-            value.apply(target, args);
-            return target.response;
-          };
-        } else {
-          return value;
-        }
-      },
-    });
+  async handleWS(
+    req: Request,
+    server: Server,
+    path: string
+  ): Promise<Response | void> {
+    try {
+      let context = new WSContext(req, path);
+      if (this.wsOnConnects[path]) {
+        let onConnect = this.wsOnConnects[path];
+        await onConnect(context);
+        await this.wsOnConnects[path](context);
+      }
+      if (server.upgrade(req, context)) {
+        return;
+      }
+    } catch (e: any) {
+      throw new SystemErr(SystemErrCode.WEBSOCKET_UPGRADE_FAILURE, e.message);
+    }
   }
 
-  private openServer(port: number) {
-    const that = this;
-    Bun.serve({
-      port,
-      reusePort: true,
-      async fetch(request, server: Server) {
-        console.log(`Handling request: ${request.method} ${request.url}`);
-        const req = await that.bunRequest(request);
+  async handleOpenWS(ws: ServerWebSocket<unknown>) {
+    let data = ws.data as any;
+    let handler = this.wsOpenRoutes[data.path];
+    if (handler) await handler(ws);
+  }
 
-        const res = that.responseProxy();
+  private async handleMessageWS(
+    ws: ServerWebSocket<unknown>,
+    message: string | Buffer<ArrayBufferLike>
+  ) {
+    let data = ws.data as any;
+    let handler = this.wsMessageRoutes[data.path];
+    if (handler) await handler(ws, message);
+  }
 
-        if (req.path.endsWith("/")) {
-          req.path = req.path.slice(0, req.path.length);
-        }
+  private async handleCloseWS(
+    ws: ServerWebSocket<unknown>,
+    code: number,
+    message: string
+  ) {
+    let data = ws.data as any;
+    let handler = this.wsCloseRoutes[data.path];
+    if (handler) await handler(ws, code, message);
+  }
 
-        const tree = that.requestMap[req.method];
-        if (!tree) {
-          //   throw new Error(`No route found for method ${req.method}`);
-          console.error(`No route found for method ${req.method}`);
-          res.status(404).send("Not Found");
-          return res.getResponse();
-        }
+  private async handleDrainWS(ws: ServerWebSocket<unknown>) {
+    let data = ws.data as any;
+    let handler = this.wsDrainRoutes[data.path];
+    if (handler) await handler(ws);
+  }
 
-        const leaf = tree.get(req.path);
-
-        if (!leaf.node) {
-          console.error(`Cannot ${req.method} ${req.path}`);
-          res.status(404).send("Not Found");
-          return res.getResponse();
-        }
-
-        req.params = leaf.routeParams;
-
-        // middlewaree handler
-        if (that.middlewares.length !== 0) {
-          const chain = new C();
-        }
-
-        const handler = leaf.node.getHandler();
-        if (handler) {
-          req.params = leaf.routeParams;
-          await handler(req, res);
-          return res.getResponse();
-        }
-        console.error(`No handler found for ${req.method} ${req.path}`);
-        res.status(404).send("Not Found");
-        return res.getResponse();
+  async listen(port: number = 8080) {
+    let app = this;
+    const server = Bun.serve({
+      port: port,
+      fetch: async (req: Request, server: Server) => {
+        return await app.handleHTTP(req, server);
       },
-      error(error) {
-        console.error("Error occurred:", error);
-        return new Response("Internal Server Error", {
-          status: 500,
-          headers: {
-            "Content-Type": "text/plain",
-          },
-        });
+      websocket: {
+        async open(ws) {
+          await app.handleOpenWS(ws);
+        },
+        async message(ws, message) {
+          await app.handleMessageWS(ws, message);
+        },
+        async close(ws, code, message) {
+          await app.handleCloseWS(ws, code, message);
+        },
+        async drain(ws) {
+          await app.handleDrainWS(ws);
+        },
       },
     });
+    console.log(`🚀 Server running on ${server.port}`);
   }
 }
-
-const server = new BunServer();
-server.get("/", (req, res) => {
-  res.json({ message: "Hello, World!" });
-});
-server.listen(3000);

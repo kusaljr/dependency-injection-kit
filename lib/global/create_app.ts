@@ -1,5 +1,3 @@
-import express, { Express } from "express";
-
 import swaggerUi from "swagger-ui-express";
 import { z } from "zod";
 import { registerControllers } from "../utils/auto-router";
@@ -10,6 +8,7 @@ import {
 } from "../utils/swagger-generator";
 import { Container } from "./container";
 
+import { BunServe, Context } from "@express-di-kit/bun-engine/exp";
 import {
   collectSocketControllersForAsyncAPI,
   generateAsyncAPIDoc,
@@ -33,11 +32,9 @@ export interface AppConfig {
   };
 }
 
-export async function createApp(config: AppConfig): Promise<Express> {
-  const app = express();
+export async function createApp(config: AppConfig) {
+  const app = new BunServe();
   const container = Container.getInstance();
-
-  app.use(express.json());
 
   generateEnvConfig(config.envSchema);
 
@@ -66,13 +63,13 @@ export async function createApp(config: AppConfig): Promise<Express> {
     });
 
     // Serve AsyncAPI JSON spec
-    app.get("/asyncapi.json", (req, res) => {
-      res.json(asyncAPIDocument);
+    app.get("/asyncapi.json", async (ctx: Context) => {
+      return ctx.json(asyncAPIDocument);
     });
 
     // Alternative: Serve using AsyncAPI React Component (self-hosted)
-    app.get("/socket-docs", (req, res) => {
-      res.send(`
+    app.get("/socket-docs", async (ctx: Context) => {
+      return ctx.send(`
         <!DOCTYPE html>
         <html>
         <head>
@@ -81,24 +78,24 @@ export async function createApp(config: AppConfig): Promise<Express> {
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <link rel="stylesheet" href="https://unpkg.com/@asyncapi/react-component@1.4.8/styles/default.min.css">
             <style>
-              body { 
-                margin: 0; 
-                padding: 20px; 
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; 
+              body {
+                margin: 0;
+                padding: 20px;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
                 background: #f8fafc;
               }
-              .container { 
-                max-width: 1200px; 
-                margin: 0 auto; 
-                background: white; 
-                border-radius: 8px; 
+              .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 8px;
                 box-shadow: 0 1px 3px rgba(0,0,0,0.1);
                 overflow: hidden;
               }
-              .header { 
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                color: white; 
-                padding: 2rem; 
+              .header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 2rem;
                 text-align: center;
               }
               .header h1 { margin: 0 0 0.5rem 0; font-size: 2rem; }

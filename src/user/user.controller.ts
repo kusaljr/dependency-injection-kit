@@ -1,13 +1,11 @@
 import {
   Body,
-  CircuitBreaker,
   Controller,
   Delete,
   Get,
   Patch,
   Post,
   Put,
-  RateLimit,
   Req,
 } from "@express-di-kit/common";
 
@@ -22,21 +20,6 @@ export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Get("/profile")
-  @CircuitBreaker({
-    cooldownTime: 60 * 1000,
-    enableLogging: true,
-    failureThreshold: 0.5,
-    fallbackFn() {
-      return Promise.resolve({
-        error: "Service is currently unavailable, please try again later.",
-      });
-    },
-  })
-  @RateLimit({
-    limit: 5,
-    windowMs: 30 * 1000,
-    errorMessage: "Too many requests, please try again later.",
-  })
   getProfile() {
     return this.userService.getUserProfile();
   }
