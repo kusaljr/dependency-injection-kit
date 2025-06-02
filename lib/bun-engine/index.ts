@@ -8,14 +8,89 @@ type RequestMethodType =
   | "PATCH"
   | "OPTIONS"
   | "HEAD";
-interface Handler {
-  (req: any, res: BunResponse): void | Promise<void>;
+
+interface BunRequest {
+  method: RequestMethodType;
+  params: { [key: string]: string };
+  path: string;
+  body: unknown;
+  query: { [key: string]: string };
+  originalUrl: string;
+  headers: { [key: string]: string | string[] };
 }
-type Middleware = Handler[];
+
+interface Handler {
+  (req: BunRequest, res: BunResponse): void | Promise<void>;
+}
+type Middlewares = Handler[];
 interface Route {
   handler: Handler;
-  middlewareFuncs?: Middleware;
+  middlewareFuncs?: Middlewares;
 }
+
+class Chain {
+  private req: BunRequest;
+  private res: BunResponse;
+  private middlewares: Middlewares;
+  private resolve!: () => void;
+  private index: number = 0;
+
+  constructor(req: BunRequest, res: BunResponse, middlewares: Middlewares) {
+    this.req = req;
+    this.res = res;
+    this.middlewares = middlewares;
+  }
+
+  private async processNext(err?: Error): Promise<void> {
+    if (err) {
+      // You can handle errors differently here if desired
+      throw err;
+    }
+
+    if (this.index < this.middlewares.length) {
+      const middleware = this.middlewares[this.index++];
+      let called = false;
+
+      const next = async (error?: Error) => {
+        if (called) return;
+        called = true;
+        await this.processNext(error);
+      };
+
+      try {
+        if (!middleware) {
+          throw new Error("Middleware function is undefined");
+        }
+
+        await middleware(this.req, this.res, next);
+        if (!called) {
+          // Middleware didn't call next; we resolve
+          this.resolve();
+        }
+      } catch (e) {
+        await this.processNext(e instanceof Error ? e : new Error(String(e)));
+      }
+    } else {
+      this.resolve();
+    }
+  }
+
+  public run(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      this.resolve = resolve;
+      this.processNext(); // no need to await here, it's handled inside
+    });
+  }
+
+  public isFinish(): boolean {
+    return this.index >= this.middlewares.length;
+  }
+
+  public isReady(): boolean {
+    return !this.isFinish();
+  }
+}
+
 class TrieTree {
   private root: Node;
   constructor() {
@@ -169,10 +244,10 @@ class BunResponse {
   }
 }
 
-export class BunServer {
+class BunServer {
   private static server?: BunServer;
   private requestMap: { [method: string]: TrieTree } = {};
-
+  private readonly middlewares: Middlewares = [];
   constructor() {
     if (BunServer.server) {
       throw new Error(
@@ -214,7 +289,7 @@ export class BunServer {
     method: RequestMethodType,
     path: string,
     handler: Handler,
-    middlewares: Middleware
+    middlewares: Middlewares = []
   ) {
     let targetTree = this.requestMap[method];
     if (!targetTree) {
@@ -256,9 +331,8 @@ export class BunServer {
 
   private async bunRequest(req: Request) {
     const { searchParams, pathname } = new URL(req.url);
-    console.log(`Received request: ${req.method} ${pathname}`);
     const newRequest = {
-      method: req.method,
+      method: req.method as RequestMethodType,
       path: pathname,
       body: null as unknown,
       query: {} as { [key: string]: string },
@@ -341,6 +415,13 @@ export class BunServer {
           return res.getResponse();
         }
 
+        req.params = leaf.routeParams;
+
+        // middlewaree handler
+        if (that.middlewares.length !== 0) {
+          const chain = new C();
+        }
+
         const handler = leaf.node.getHandler();
         if (handler) {
           req.params = leaf.routeParams;
@@ -364,8 +445,8 @@ export class BunServer {
   }
 }
 
-// const server = new BunServer();
-// server.get("/", (req, res) => {
-//   res.json({ message: "Hello, World!" });
-// });
-// server.listen(3000);
+const server = new BunServer();
+server.get("/", (req, res) => {
+  res.json({ message: "Hello, World!" });
+});
+server.listen(3000);
