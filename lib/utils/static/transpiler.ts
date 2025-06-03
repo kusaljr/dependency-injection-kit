@@ -36,6 +36,8 @@ export async function transpileReactView(
     outdir: "public",
     target: "browser",
     format: "esm",
+    minify: true,
+    splitting: true,
   });
 
   await fs.unlink(tempFilePath);

@@ -15,11 +15,11 @@ export function generateReactView(
     console.log(`Created directory: ${viewsDir}`);
   }
 
-  const jsxFileName = `${controllerClassName}.${methodName}.jsx`;
-  const jsxFilePath = path.join(viewsDir, jsxFileName);
+  const tsxFileName = `${controllerClassName}.${methodName}.tsx`;
+  const tsxFilePath = path.join(viewsDir, tsxFileName);
   const componentName = `${controllerClassName}_${methodName}`;
 
-  if (fs.existsSync(jsxFilePath)) {
+  if (fs.existsSync(tsxFilePath)) {
     return;
   }
 
@@ -29,8 +29,7 @@ export function generateReactView(
  */
 
 
-export default function ${componentName}({props}) {
-  const props = useServerProps();
+export default function ${componentName}({props}:{props: any}) {
   
   return (
     <div>
@@ -58,6 +57,6 @@ export default function ${componentName}({props}) {
 }
 `.trim();
 
-  fs.writeFileSync(jsxFilePath, template, "utf8");
-  console.log(`✅ Generated React view: ${jsxFilePath}`);
+  fs.writeFileSync(tsxFileName, template, "utf8");
+  console.log(`✅ Generated React view: ${tsxFileName}`);
 }

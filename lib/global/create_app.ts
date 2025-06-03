@@ -7,7 +7,7 @@ import {
 } from "../utils/swagger-generator";
 import { Container } from "./container";
 
-import { BunServe, Context } from "@express-di-kit/bun-engine/exp";
+import { BunServe, Context } from "@express-di-kit/bun-engine";
 import { serveSwagger } from "@express-di-kit/swagger/route";
 import {
   collectSocketControllersForAsyncAPI,

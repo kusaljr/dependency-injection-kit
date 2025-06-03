@@ -10,7 +10,7 @@ import {
 import { Constructor, Container } from "../global/container";
 import { findControllerFiles } from "./find-controller";
 
-import { BunServe, Context } from "@express-di-kit/bun-engine/exp";
+import { BunServe, Context } from "@express-di-kit/bun-engine";
 import { getZodSchemaForDto } from "@express-di-kit/validator/utils";
 import * as fs from "fs";
 import * as path from "path";
