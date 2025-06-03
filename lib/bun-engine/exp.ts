@@ -21,6 +21,10 @@ export interface Context {
       | Blob
       | null
   ): Response;
+  file(
+    filePath: string,
+    options?: { headers?: Record<string, string> }
+  ): Response;
   json(data: object | Array<any>): Response;
   set(name: string, value: string): Context;
   setHeader(name: string, value: string): Context;
@@ -118,6 +122,18 @@ type ExpressRes = {
   end(data?: any): void;
   [key: string]: any;
 };
+
+// Helper function to get content type based on file extension
+function getContentType(path: string): string {
+  if (path.endsWith(".html")) return "text/html";
+  if (path.endsWith(".css")) return "text/css";
+  if (path.endsWith(".js")) return "application/javascript";
+  if (path.endsWith(".json")) return "application/json";
+  if (path.endsWith(".png")) return "image/png";
+  if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+  if (path.endsWith(".svg")) return "image/svg+xml";
+  return "application/octet-stream";
+}
 
 // This function wraps an Express-style middleware (req, res, next)
 // so it can be used within our BunServe (Context, next) chain.
@@ -427,6 +443,26 @@ export class BunServe {
     const method = req.method;
     const requestPath = url.pathname;
 
+    // Only serve files from /public route
+    if (url.pathname.startsWith("/public")) {
+      // Strip /public from the path and resolve the file path
+      const filePath = `.${url.pathname}`;
+      try {
+        const file = Bun.file(filePath);
+        if (await file.exists()) {
+          return new Response(file, {
+            headers: {
+              "Content-Type": getContentType(filePath),
+            },
+          });
+        } else {
+          return new Response("File not found", { status: 404 });
+        }
+      } catch (err) {
+        return new Response("Error reading file", { status: 500 });
+      }
+    }
+
     const { handler, params } = this.router.find(method, url);
 
     const query = Object.fromEntries(url.searchParams.entries());
@@ -435,6 +471,9 @@ export class BunServe {
       req,
       params,
       query,
+      file(filePath, options) {
+        return new Response(Bun.file(filePath));
+      },
       locals: {},
       statusCode: 200,
       headers: new Headers(),

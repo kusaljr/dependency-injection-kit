@@ -18,7 +18,7 @@ import { REACT_METADATA } from "../ops/react/decorator";
 import { SOCKET_METADATA_KEY } from "../ops/socket/decorator";
 import { WebSocketServer } from "../ops/socket/web-socket";
 import { generateReactView } from "./static/generate-react-view";
-import { renderReactView } from "./static/render-react-view";
+import { transpileReactView } from "./static/transpiler";
 
 const wrapMiddleware = (fn: any) => {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -244,9 +244,15 @@ export async function registerControllers(
                     "views",
                     `${ControllerClass.name}.${handler}.jsx`
                   );
-
-                  const html = renderReactView(tsxFile, result);
-                  ctx.send(html);
+                  // get original response of this handler
+                  const originalResponse = ctx.body || result;
+                  const html = await transpileReactView(
+                    tsxFile,
+                    originalResponse
+                  );
+                  if (html.success) {
+                    return ctx.file(html.path as string);
+                  }
                 } else {
                   if (result !== undefined) {
                     ctx.json(result);
