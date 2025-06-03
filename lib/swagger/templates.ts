@@ -5,7 +5,7 @@ export const htmlTplString = `
   <meta charset="UTF-8">
   <% robotsMetaString %>
   <title><% title %></title>
-  <link rel="stylesheet" type="text/css" href="./swagger-ui-assets/swagger-ui.css" >
+  <link rel="stylesheet" type="text/css" href="/swagger-ui-assets/swagger-ui.css" >
   <% favIconString %>
   <style>
     html
@@ -66,9 +66,9 @@ export const htmlTplString = `
 
 <div id="swagger-ui"></div>
 
-<script src="./swagger-ui-assets/swagger-ui-bundle.js"> </script>
-<script src="./swagger-ui-assets/swagger-ui-standalone-preset.js"> </script>
-<script src="./swagger-ui-init.js"> </script>
+<script src="/swagger-ui-assets/swagger-ui-bundle.js"> </script>
+<script src="/swagger-ui-assets/swagger-ui-standalone-preset.js"> </script>
+<script src="/swagger-ui-init.js"> </script>
 <% customJs %>
 <% customJsStr %>
 <% customCssUrl %>
@@ -81,8 +81,8 @@ export const htmlTplString = `
 `;
 
 export const favIconHtml =
-  `<link rel="icon" type="image/png" href="./swagger-ui-assets/favicon-32x32.png" sizes="32x32" />` +
-  `<link rel="icon" type="image/png" href="./swagger-ui-assets/favicon-16x16.png" sizes="16x16" />`;
+  `<link rel="icon" type="image/png" href="/swagger-ui-assets/favicon-32x32.png" sizes="32x32" />` +
+  `<link rel="icon" type="image/png" href="/swagger-ui-assets/favicon-16x16.png" sizes="16x16" />`;
 
 export const jsTplString = `
 window.onload = function() {

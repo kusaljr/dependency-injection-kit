@@ -50,6 +50,10 @@ class Router {
   }
 
   add(method: string, path: string, handler: RouteHandler) {
+    // Normalize the path here when adding a route
+    if (path.length > 1 && path.endsWith("/")) {
+      path = path.slice(0, -1);
+    }
     if (!this.routes.has(path)) {
       this.routes.set(path, new Map());
     }
@@ -58,9 +62,9 @@ class Router {
 
   find(
     method: string,
-    url: URL
+    url: URL // url.pathname is expected to be normalized by the caller
   ): { handler: RouteHandler | undefined; params: Record<string, string> } {
-    const path = url.pathname;
+    const path = url.pathname; // This `path` should already be normalized by `handleRequest`
     const methodRoutes = this.routes.get(path);
 
     if (methodRoutes?.has(method.toUpperCase())) {
@@ -151,16 +155,22 @@ function wrapExpressMiddleware(
     return new Promise<Response>((resolve, reject) => {
       const fullUrl = new URL(ctx.req.url);
       const baseUrl = "/api-docs"; // Make sure this matches your app.use("/api-docs", ...)
-      const pathRelativeToBase = fullUrl.pathname.startsWith(baseUrl)
+      // Normalize pathRelativeToBase as well, as it's used in expressReq.path and expressReq.url
+      let pathRelativeToBase = fullUrl.pathname.startsWith(baseUrl)
         ? fullUrl.pathname.substring(baseUrl.length)
         : fullUrl.pathname;
+
+      if (pathRelativeToBase.length > 1 && pathRelativeToBase.endsWith("/")) {
+        pathRelativeToBase = pathRelativeToBase.slice(0, -1);
+      }
+
       const pathWithQueryRelativeToBase = pathRelativeToBase + fullUrl.search;
 
       const expressReq: ExpressReq = {
         url: pathWithQueryRelativeToBase,
         originalUrl: ctx.req.url,
         baseUrl: baseUrl,
-        path: pathRelativeToBase.split("?")[0],
+        path: pathRelativeToBase.split("?")[0], // path should be normalized
         method: ctx.req.method,
         headers: { ...ctx.req.headers },
         query: ctx.query,
@@ -302,11 +312,13 @@ export class BunServe {
       middlewares = middlewares.slice(1);
     }
 
-    if (prefix !== "/" && !prefix.startsWith("/")) {
-      prefix = "/" + prefix;
-    }
+    // Normalize prefix: remove trailing slash unless it's just '/'
     if (prefix.length > 1 && prefix.endsWith("/")) {
       prefix = prefix.slice(0, -1);
+    }
+    // Ensure prefix starts with /
+    if (prefix !== "/" && !prefix.startsWith("/")) {
+      prefix = "/" + prefix;
     }
 
     for (const arg of middlewares) {
@@ -320,7 +332,14 @@ export class BunServe {
         );
         handlers.push(...nestedHandlers);
       } else if (typeof arg === "function") {
-        handlers.push(wrapExpressMiddleware(arg as any));
+        // Here, we check if it's an Express-style middleware (3 arguments)
+        // or a BunServe middleware (2 arguments).
+        // This is a heuristic and might need more robust checking for complex cases.
+        if (arg.length === 3) {
+          handlers.push(wrapExpressMiddleware(arg as any));
+        } else {
+          handlers.push(arg as Middleware); // Assume it's a BunServe middleware
+        }
       } else {
         console.warn(
           `[BunServe] Ignored invalid middleware argument: ${typeof arg}`,
@@ -357,6 +376,11 @@ export class BunServe {
       | ((req: any, res: any, next: any) => void)
     )[]
   ) {
+    // Normalize the path for routeMiddlewares storage and router.add
+    if (path.length > 1 && path.endsWith("/")) {
+      path = path.slice(0, -1);
+    }
+
     const finalHandler = args.pop() as RouteHandler;
     const middlewares = args as (
       | Middleware
@@ -441,12 +465,18 @@ export class BunServe {
   private async handleRequest(req: ExpressReq): Promise<Response> {
     const url = new URL(req.url);
     const method = req.method;
-    const requestPath = url.pathname;
+
+    // Normalize the URL's pathname for consistent routing and middleware matching
+    if (url.pathname.length > 1 && url.pathname.endsWith("/")) {
+      url.pathname = url.pathname.slice(0, -1);
+    }
+    const requestPath = url.pathname; // This is now the normalized path
 
     // Only serve files from /public route
-    if (url.pathname.startsWith("/public")) {
+    if (requestPath.startsWith("/public")) {
+      // Use normalized path
       // Strip /public from the path and resolve the file path
-      const filePath = `.${url.pathname}`;
+      const filePath = `.${url.pathname}`; // url.pathname is already normalized
       try {
         const file = Bun.file(filePath);
         if (await file.exists()) {
@@ -463,7 +493,7 @@ export class BunServe {
       }
     }
 
-    const { handler, params } = this.router.find(method, url);
+    const { handler, params } = this.router.find(method, url); // url.pathname is normalized
 
     const query = Object.fromEntries(url.searchParams.entries());
 
@@ -531,12 +561,14 @@ export class BunServe {
     const allApplicableMiddlewares: Middleware[] = [];
 
     this.globalMiddlewares.forEach((mw) => {
+      // Use the normalized requestPath for middleware prefix matching
       if (requestPath.startsWith(mw.prefix)) {
         allApplicableMiddlewares.push(mw.middleware);
       }
     });
 
     if (handler) {
+      // Use the normalized requestPath to retrieve route-specific middlewares
       const routeSpecificMWs = this.routeMiddlewares
         .get(requestPath)
         ?.get(method.toUpperCase());
