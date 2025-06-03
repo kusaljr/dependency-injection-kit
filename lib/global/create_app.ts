@@ -1,4 +1,3 @@
-import swaggerUi from "swagger-ui-express";
 import { z } from "zod";
 import { registerControllers } from "../utils/auto-router";
 import { generateEnvConfig } from "../utils/env-generator";
@@ -9,6 +8,7 @@ import {
 import { Container } from "./container";
 
 import { BunServe, Context } from "@express-di-kit/bun-engine/exp";
+import { serveSwagger } from "@express-di-kit/swagger/route";
 import {
   collectSocketControllersForAsyncAPI,
   generateAsyncAPIDoc,
@@ -150,7 +150,8 @@ export async function createApp(config: AppConfig) {
       description,
     });
 
-    app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+    serveSwagger(app, "/api-docs", swaggerDocument, {});
+
     console.log("Swagger UI available at http://localhost:3000/api-docs");
   }
 
