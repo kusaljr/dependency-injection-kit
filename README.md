@@ -1,8 +1,10 @@
-# Express Dependency Injection Library
+# Dependency Injection Library
 
 ## Overview
 
-This library provides a simple and flexible way to manage dependencies in your Express applications. It allows you to define services and inject them into your routes, controllers, and middleware.
+This library provides a simple and flexible way to manage dependencies in your application, which serves as a full stack framework with in the box features like automatic dependency injection, validation, middleware injection, React server rendering, and WebSocket integration.
+
+It is designed to work with `Bun.js`, allowing you to build modern web applications with ease. The library uses decorators to define controllers, services, and middleware, making it easy to organize your code and manage dependencies.
 
 ## Features
 
