@@ -3,7 +3,7 @@ export interface Context {
   _response?: Response;
   params: Record<string, string>;
   query: Record<string, string>;
-  body?: any;
+  body?: any; // The parsed body will be stored here
   locals: Record<string, any>;
 
   statusCode: number;
@@ -109,7 +109,7 @@ type ExpressReq = {
   headers: Record<string, string | string[]>;
   query: Record<string, string>;
   params: Record<string, string>;
-  body?: any;
+  body?: any; // This will now hold the parsed body
   [key: string]: any; // Allow arbitrary properties
 };
 
@@ -175,7 +175,7 @@ function wrapExpressMiddleware(
         headers: { ...ctx.req.headers },
         query: ctx.query,
         params: ctx.params,
-        body: ctx.body,
+        body: ctx.body, // Pass the parsed body from BunServe context
         accepts: ctx.req.headers["accept"] || "*/*",
       };
 
@@ -462,15 +462,43 @@ export class BunServe {
     return this.registerRoute("PATCH", path, args);
   }
 
-  private async handleRequest(req: ExpressReq): Promise<Response> {
-    const url = new URL(req.url);
-    const method = req.method;
+  private async handleRequest(bunRequest: Request): Promise<Response> {
+    const url = new URL(bunRequest.url);
+    const method = bunRequest.method;
 
     // Normalize the URL's pathname for consistent routing and middleware matching
     if (url.pathname.length > 1 && url.pathname.endsWith("/")) {
       url.pathname = url.pathname.slice(0, -1);
     }
     const requestPath = url.pathname; // This is now the normalized path
+
+    let parsedBody: any;
+    try {
+      const contentType = bunRequest.headers.get("content-type");
+      if (
+        bunRequest.body &&
+        bunRequest.method !== "GET" &&
+        bunRequest.method !== "HEAD"
+      ) {
+        if (contentType?.includes("application/json")) {
+          parsedBody = await bunRequest.json();
+        } else if (contentType?.includes("application/x-www-form-urlencoded")) {
+          const formData = await bunRequest.text();
+          parsedBody = Object.fromEntries(new URLSearchParams(formData));
+        } else if (contentType?.includes("multipart/form-data")) {
+          parsedBody = await bunRequest.formData();
+        } else if (contentType?.includes("text/plain")) {
+          parsedBody = await bunRequest.text();
+        }
+        // Add more body parsing types (e.g., ArrayBuffer, Blob) as needed
+      }
+    } catch (error: any) {
+      console.error("Error parsing request body:", error);
+      return new Response(
+        `Bad Request: Invalid body format. ${error.message}`,
+        { status: 400 }
+      );
+    }
 
     // Only serve files from /public route
     if (requestPath.startsWith("/public")) {
@@ -498,9 +526,22 @@ export class BunServe {
     const query = Object.fromEntries(url.searchParams.entries());
 
     const ctx: Context = {
-      req,
+      req: {
+        // Construct ExpressReq from Bun's Request and parsed data
+        url: bunRequest.url,
+        originalUrl: bunRequest.url,
+        baseUrl: "", // This might need more logic for nested routers
+        path: url.pathname.split("?")[0], // Normalized path
+        method: bunRequest.method,
+        headers: Object.fromEntries(bunRequest.headers.entries()),
+        query: query,
+        params: params,
+        body: parsedBody, // Assign the parsed body here
+        accepts: bunRequest.headers.get("accept") || "*/*",
+      },
       params,
       query,
+      body: parsedBody, // Assign the parsed body to ctx.body
       file(filePath, options) {
         return new Response(Bun.file(filePath));
       },
@@ -525,14 +566,11 @@ export class BunServe {
           | Blob
           | null
       ): Response {
-        // Only set text/plain if NO Content-Type is set at all.
-        // This allows HTML/JSON/other explicit types to pass through.
         if (!this.headers.has("Content-Type")) {
           if (typeof data === "string" && data.trim().startsWith("<")) {
-            // Heuristic for HTML
             this.headers.set("Content-Type", "text/html; charset=utf-8");
           } else {
-            this.headers.set("Content-Type", "text/html; charset=utf-8");
+            this.headers.set("Content-Type", "text/html; charset=utf-8"); // Default to text/html for string data
           }
         }
         this._response = new Response(data, {
@@ -621,7 +659,7 @@ export class BunServe {
     Bun.serve({
       port: this.port,
       hostname: this.hostname,
-      fetch: this.handleRequest.bind(this) as any,
+      fetch: this.handleRequest.bind(this) as any, // Bun's fetch receives a Request object
       error(error: Error) {
         console.error("Bun server error:", error);
         return new Response(`Server Error: ${error.message}`, { status: 500 });
