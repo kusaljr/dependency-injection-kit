@@ -10,7 +10,7 @@ import {
 import { Constructor, Container } from "../global/container";
 import { findControllerFiles } from "./find-controller";
 
-import { BunServe } from "@express-di-kit/bun-engine/exp";
+import { BunServe, Context } from "@express-di-kit/bun-engine/exp";
 import { getZodSchemaForDto } from "@express-di-kit/validator/utils";
 import * as fs from "fs";
 import * as path from "path";
@@ -179,11 +179,7 @@ export async function registerControllers(
                 route.handlerName
               ) || [];
 
-            const finalRouteHandler = async (
-              req: Request,
-              res: Response,
-              next: NextFunction
-            ) => {
+            const finalRouteHandler = async (ctx: Context) => {
               const parameters: ParameterDefinition[] =
                 Reflect.getMetadata(
                   "parameters",
@@ -198,16 +194,16 @@ export async function registerControllers(
               for (const param of parameters) {
                 switch (param.type) {
                   case ParameterType.REQ:
-                    args[param.index] = req;
+                    args[param.index] = ctx.req;
                     break;
                   case ParameterType.RES:
-                    args[param.index] = res;
+                    args[param.index] = ctx;
                     break;
                   case ParameterType.PARAM:
-                    args[param.index] = req.params[param.name!];
+                    args[param.index] = ctx.params[param.name!];
                     break;
                   case ParameterType.QUERY:
-                    args[param.index] = req.query[param.name!];
+                    args[param.index] = ctx.query[param.name!];
                     break;
                   case ParameterType.BODY:
                     const ParamType = Reflect.getMetadata(
@@ -218,10 +214,10 @@ export async function registerControllers(
 
                     const zodSchema = getZodSchemaForDto(ParamType);
 
-                    const parseResult = zodSchema.safeParse(req.body);
+                    const parseResult = zodSchema.safeParse(ctx.req.body);
 
                     if (!parseResult.success) {
-                      res.status(422).json({
+                      ctx.status(422).json({
                         message: "Validation failed",
                         errors: parseResult.error.flatten().fieldErrors,
                       });
@@ -241,7 +237,7 @@ export async function registerControllers(
                   args
                 );
 
-                if (hasReactMetadata && req.accepts("html")) {
+                if (hasReactMetadata) {
                   const handler = String(route.handlerName);
                   const tsxFile = path.join(
                     path.dirname(filePath),
@@ -250,10 +246,10 @@ export async function registerControllers(
                   );
 
                   const html = renderReactView(tsxFile, result);
-                  res.send(html);
+                  ctx.send(html);
                 } else {
-                  if (result !== undefined && !res.headersSent) {
-                    res.json(result);
+                  if (result !== undefined) {
+                    ctx.json(result);
                   }
                 }
               } catch (error) {
@@ -263,8 +259,8 @@ export async function registerControllers(
                   }:`,
                   error
                 );
-                if (!res.headersSent) {
-                  res.status(500).json({ error: "Internal Server Error" });
+                if (!ctx.headersSent) {
+                  ctx.status(500).json({ error: "Internal Server Error" });
                 }
               }
             };

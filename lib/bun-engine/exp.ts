@@ -1,5 +1,5 @@
 export interface Context {
-  req: Request;
+  req: ExpressReq;
   _response?: Response;
   params: Record<string, string>;
   query: Record<string, string>;
@@ -10,6 +10,7 @@ export interface Context {
   headers: Headers;
 
   status(code: number): Context;
+  headersSent(): boolean;
   send(
     data:
       | string
@@ -91,12 +92,13 @@ class Router {
 
 // --- NEW: Shim for Express-style middleware ---
 type ExpressReq = {
-  url?: string;
+  url: string;
+  accepts: string | string[];
   originalUrl?: string;
   baseUrl?: string; // Important for nested routers/middleware
-  path?: string;
+  path: string;
   method: string;
-  headers: Record<string, string | string[] | undefined>;
+  headers: Record<string, string | string[]>;
   query: Record<string, string>;
   params: Record<string, string>;
   body?: any;
@@ -144,10 +146,11 @@ function wrapExpressMiddleware(
         baseUrl: baseUrl,
         path: pathRelativeToBase.split("?")[0],
         method: ctx.req.method,
-        headers: Object.fromEntries(ctx.req.headers.entries()),
+        headers: { ...ctx.req.headers },
         query: ctx.query,
         params: ctx.params,
         body: ctx.body,
+        accepts: ctx.req.headers["accept"] || "*/*",
       };
 
       const expressRes: ExpressRes = {
@@ -419,7 +422,7 @@ export class BunServe {
     return this.registerRoute("PATCH", path, args);
   }
 
-  private async handleRequest(req: Request): Promise<Response> {
+  private async handleRequest(req: ExpressReq): Promise<Response> {
     const url = new URL(req.url);
     const method = req.method;
     const requestPath = url.pathname;
@@ -435,6 +438,9 @@ export class BunServe {
       locals: {},
       statusCode: 200,
       headers: new Headers(),
+      headersSent() {
+        return !!this._response;
+      },
 
       status(code: number): Context {
         this.statusCode = code;
@@ -544,7 +550,7 @@ export class BunServe {
     Bun.serve({
       port: this.port,
       hostname: this.hostname,
-      fetch: this.handleRequest.bind(this),
+      fetch: this.handleRequest.bind(this) as any,
       error(error: Error) {
         console.error("Bun server error:", error);
         return new Response(`Server Error: ${error.message}`, { status: 500 });
