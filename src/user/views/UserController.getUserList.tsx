@@ -24,7 +24,9 @@ export default function UserController_getUserList({ props }: { props: any }) {
       <h1 className="text-2xl font-bold text-gray-800">
         User List from /user/list
       </h1>
-      <p className="text-gray-600">You are logged in as </p>
+      <p className="text-gray-600">
+        You are logged in as {props.data.currentUser.name}
+      </p>
       <SadComponent />
       <Table dataSource={props.data.users} columns={columns} />;
     </div>

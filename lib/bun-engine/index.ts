@@ -153,9 +153,10 @@ function wrapExpressMiddleware(
     bunNext: () => Promise<Response>
   ): Promise<Response> => {
     return new Promise<Response>((resolve, reject) => {
+      let nextCalled = false; // Flag to track if expressNext has been called
+
       const fullUrl = new URL(ctx.req.url);
       const baseUrl = "/api-docs"; // Make sure this matches your app.use("/api-docs", ...)
-      // Normalize pathRelativeToBase as well, as it's used in expressReq.path and expressReq.url
       let pathRelativeToBase = fullUrl.pathname.startsWith(baseUrl)
         ? fullUrl.pathname.substring(baseUrl.length)
         : fullUrl.pathname;
@@ -163,32 +164,45 @@ function wrapExpressMiddleware(
       if (pathRelativeToBase.length > 1 && pathRelativeToBase.endsWith("/")) {
         pathRelativeToBase = pathRelativeToBase.slice(0, -1);
       }
-
       const pathWithQueryRelativeToBase = pathRelativeToBase + fullUrl.search;
 
-      const expressReq: ExpressReq = {
-        url: pathWithQueryRelativeToBase,
-        originalUrl: ctx.req.url,
-        baseUrl: baseUrl,
-        path: pathRelativeToBase.split("?")[0], // path should be normalized
-        method: ctx.req.method,
-        headers: { ...ctx.req.headers },
-        query: ctx.query,
-        params: ctx.params,
-        body: ctx.body, // Pass the parsed body from BunServe context
-        accepts: ctx.req.headers["accept"] || "*/*",
-      };
+      // Make expressReq a proxy or use Object.assign to keep it dynamic with ctx.req
+      // The current approach creates a shallow copy, which doesn't work for adding new properties.
+      // A better way is to directly pass ctx.req and modify it, but then it needs to look like ExpressReq.
+      // Let's modify ctx.req directly to avoid complex merging.
+
+      // IMPORTANT: Adjust ctx.req structure to match ExpressReq expectations
+      // This means that ctx.req will now contain ALL properties that an ExpressReq would have.
+      // And middleware will directly modify ctx.req.
+      const expressReq: ExpressReq = ctx.req; // Direct reference to ctx.req
+
+      // Ensure expressReq has required Express-specific properties if they're not already there
+      expressReq.url = expressReq.url || ctx.req.url;
+      expressReq.originalUrl = expressReq.originalUrl || ctx.req.url;
+      expressReq.baseUrl = expressReq.baseUrl || baseUrl; // Or determine dynamically
+      expressReq.path = expressReq.path || fullUrl.pathname.split("?")[0];
+      expressReq.method = expressReq.method || ctx.req.method;
+      expressReq.headers =
+        expressReq.headers ||
+        (ctx.req.headers instanceof Headers
+          ? Object.fromEntries(ctx.req.headers.entries())
+          : ctx.req.headers);
+      expressReq.query = expressReq.query || ctx.query;
+      expressReq.params = expressReq.params || ctx.params;
+      expressReq.body = expressReq.body || ctx.body;
+      expressReq.accepts =
+        expressReq.accepts || ctx.req.headers["accept"] || "*/*";
 
       const expressRes: ExpressRes = {
         statusCode: ctx.statusCode,
-        headers: {}, // Express middleware will set headers here
+        headers: {},
         _body: null,
         _isEnded: false,
-        _bunCtx: ctx, // Store reference to BunServe Context
+        _bunCtx: ctx,
 
         status(code: number): ExpressRes {
           this.statusCode = code;
-          this._bunCtx.statusCode = code; // Propagate to Bun Context
+          this._bunCtx.statusCode = code;
           return this;
         },
         sendStatus(code: number): ExpressRes {
@@ -209,19 +223,16 @@ function wrapExpressMiddleware(
         },
         setHeader(name: string, value: string): void {
           this.headers[name] = value;
-          // IMPORTANT: Do NOT immediately set on ctx.headers here.
-          // This is because ctx.send() might be called by the next line,
-          // and we want its own default to potentially apply *before*
-          // the express middleware explicitly sets content-type.
-          // The headers will be merged at the `end()` step.
         },
         end(data?: any): void {
+          if (this._isEnded) {
+            return;
+          }
           if (data !== undefined) {
             this._body = data;
           }
           this._isEnded = true;
 
-          // Merge collected ExpressRes headers into BunServe Context's headers
           for (const headerName in this.headers) {
             if (
               this.headers.hasOwnProperty(headerName) &&
@@ -234,39 +245,40 @@ function wrapExpressMiddleware(
             }
           }
 
-          if (
-            this._body !== null ||
-            this.statusCode !== this._bunCtx.statusCode ||
-            Object.keys(this.headers).length > 0
-          ) {
-            const finalBody =
-              typeof this._body === "string" ||
-              this._body instanceof Uint8Array ||
-              this._body instanceof ArrayBuffer ||
-              this._body instanceof ReadableStream ||
-              this._body instanceof FormData ||
-              this._body instanceof Blob ||
-              this._body === null
-                ? this._body
-                : String(this._body);
+          const finalBody =
+            typeof this._body === "string" ||
+            this._body instanceof Uint8Array ||
+            this._body instanceof ArrayBuffer ||
+            this._body instanceof ReadableStream ||
+            this._body instanceof FormData ||
+            this._body instanceof Blob ||
+            this._body === null
+              ? this._body
+              : String(this._body);
 
-            // Now, create the actual Bun Response using the merged headers from ctx.headers
-            const response = new Response(finalBody, {
-              status: this.statusCode,
-              headers: this._bunCtx.headers, // Use the now updated ctx.headers
-            });
-            this._bunCtx._response = response;
-            resolve(response);
-          } else {
-            resolve(bunNext());
-          }
+          const response = new Response(finalBody, {
+            status: this.statusCode,
+            headers: this._bunCtx.headers,
+          });
+          this._bunCtx._response = response;
+          resolve(response);
         },
       };
 
       const expressNext = (err?: any) => {
+        if (nextCalled) {
+          console.warn(
+            "[BunServe] expressNext() called more than once for a single request."
+          );
+          return;
+        }
+        nextCalled = true;
+
         if (err) {
           reject(err);
         } else {
+          // If next is called, ensure we resolve the current middleware's promise
+          // by letting the BunServe chain continue.
           bunNext().then(resolve).catch(reject);
         }
       };
@@ -274,9 +286,15 @@ function wrapExpressMiddleware(
       try {
         expressMiddleware(expressReq, expressRes, expressNext);
 
-        if (!expressRes._isEnded && !ctx._response) {
-          bunNext().then(resolve).catch(reject);
-        }
+        // This check should be re-evaluated carefully.
+        // If expressMiddleware does NOT call expressNext or expressRes.end synchronously,
+        // we implicitly assume it will do so asynchronously.
+        // If it never does, the request will hang.
+        // The core issue with data not populating is about `expressReq` vs `ctx.req`.
+        // If expressMiddleware finishes async work and then calls next(),
+        // the `nextCalled` flag ensures `bunNext` is only invoked once.
+        // If it async-sends a response, `_isEnded` handles it.
+        // We removed the implicit `bunNext()` call after the middleware execution to prevent double execution.
       } catch (error) {
         reject(error);
       }

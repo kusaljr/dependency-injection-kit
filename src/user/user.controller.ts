@@ -20,7 +20,7 @@ export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Get("/profile")
-  getProfile() {
+  getProfile(@Req req: Request & { user: { id: number; name: string } }) {
     return this.userService.getUserProfile();
   }
 
