@@ -1,6 +1,10 @@
+import { exec } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { promisify } from "node:util";
+
+const execPromise = promisify(exec);
 
 export async function transpileReactView(
   componentFilePath: string,
@@ -16,6 +20,7 @@ export async function transpileReactView(
     .resolve(componentFilePath)
     .replace(/\\/g, "/");
 
+  // Create injected TSX entrypoint
   const injectedContent = `
     import React from "react";
     import ReactDOM from "react-dom/client";
@@ -31,6 +36,7 @@ export async function transpileReactView(
 
   await fs.writeFile(tempFilePath, injectedContent, "utf8");
 
+  // Transpile TSX to JS using Bun
   const result = await Bun.build({
     entrypoints: [tempFilePath],
     outdir: "public",
@@ -42,12 +48,36 @@ export async function transpileReactView(
 
   await fs.unlink(tempFilePath);
 
+  // Build Tailwind CSS dynamically
+  const tailwindInputPath = path.join("public", `tailwind-${tempId}.css`);
+  const tailwindOutputPath = path.join("public", "index.css");
+
+  await fs.writeFile(
+    tailwindInputPath,
+    `@tailwind base;\n@tailwind components;\n@tailwind utilities;`,
+    "utf8"
+  );
+
+  try {
+    await execPromise(
+      `npx tailwindcss -i ${tailwindInputPath} -o ${tailwindOutputPath} --content ${componentFilePath}`
+    );
+    await fs.unlink(tailwindInputPath);
+  } catch (err) {
+    console.error("Tailwind CSS build failed:", err);
+    return {
+      success: false,
+      error: "Tailwind CSS build failed",
+    };
+  }
+
+  // Write output JS and HTML
   for (const res of result.outputs) {
     const jsOutputPath = path.join("public", "index.js");
     await fs.writeFile(jsOutputPath, await res.text(), "utf8");
     await fs.unlink(res.path);
 
-    // Generate a basic HTML file that injects props and loads the JS
+    const htmlPath = path.join("public", "index.html");
     const html = `
       <!DOCTYPE html>
       <html lang="en">
@@ -55,6 +85,7 @@ export async function transpileReactView(
         <meta charset="UTF-8" />
         <title>React View</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="stylesheet" href="/public/index.css" />
         <script>window.__REACT_PROPS__ = ${propsJSON};</script>
       </head>
       <body>
@@ -64,7 +95,6 @@ export async function transpileReactView(
       </html>
     `;
 
-    const htmlPath = path.join("public", "index.html");
     await fs.writeFile(htmlPath, html, "utf8");
 
     return {

@@ -243,7 +243,7 @@ export async function registerControllers(
                   const tsxFile = path.join(
                     path.dirname(filePath),
                     "views",
-                    `${ControllerClass.name}.${handler}.jsx`
+                    `${ControllerClass.name}.${handler}.tsx`
                   );
                   // get original response of this handler
                   const originalResponse = ctx.body || result;

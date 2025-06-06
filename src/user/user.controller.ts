@@ -16,11 +16,11 @@ import { UserDto } from "./user.dto";
 import { UserService } from "./user.service";
 
 @Controller("/user")
-@UseGuards(AuthGuard)
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Get("/profile")
+  @UseGuards(AuthGuard)
   getProfile(@Req req: Request & { user: { id: number; name: string } }) {
     return this.userService.getUserProfile();
   }
