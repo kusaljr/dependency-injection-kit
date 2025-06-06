@@ -65,6 +65,43 @@ export class UserController {
 }
 ```
 
+### Exception Handling
+The library provides built-in exception handling for common HTTP errors. You can throw exceptions in your controllers, and they will be automatically handled and returned as HTTP responses.
+Example:
+
+```typescript
+import { Controller, Get, NotFoundException } from "express-di-kit/common";
+@Controller("/example")
+export class ExampleController {
+  @Get("/:id")
+  async getExampleById(id: string) {
+    // Simulate a scenario where the resource is not found
+    if (id !== "1") {
+      throw new NotFoundException("Resource not found");
+    }
+    return { message: "Resource found" };
+  }
+}
+```
+
+Available exceptions include:
+- `BadRequestException`
+- `UnauthorizedException`
+- `ForbiddenException`
+- `NotFoundException`
+- `MethodNotAllowedException`
+- `InternalServerErrorException`
+- `ServiceUnavailableException`
+- `GatewayTimeoutException`
+- `ConflictException`
+- `TooManyRequestsException`
+- `UnprocessableEntityException`
+- `NotImplementedException`
+- `HttpException`
+- `HttpStatusException`
+- `HttpErrorException`
+- `HttpExceptionFilter`
+
 ### Middleware Injection
 
 You can also inject services into your middleware functions. This allows you to use your services in your middleware logic without having to manually instantiate them.
