@@ -160,32 +160,4 @@ export class ExampleController {
 }
 ```
 
-### Add Packages
 
-You can add client side packages by running the following command:
-
-```bash
-npm run client ${packageName}
-```
-
-This will generate a esm imports in `react-importmap.json` file and automatically added to final client bundle.
-
-## Websocket Integration
-
-The library supports WebSocket integration, allowing you to create WebSocket handlers and inject dependencies into them.
-
-Example:
-
-```typescript
-import { Socket, Subscribe } from "express-di-kit/socket";
-
-@Socket("/example")
-export class ExampleSocket {
-  constructor(private exampleService: ExampleService) {}
-
-  @Subscribe("message")
-  async onMessage(data: any) {
-    return this.exampleService.processMessage(data);
-  }
-}
-```
