@@ -6,6 +6,8 @@ This library provides a simple and flexible way to manage dependencies in your a
 
 It is designed to work with `Bun.js`, allowing you to build modern web applications with ease. The library uses decorators to define controllers, services, and middleware, making it easy to organize your code and manage dependencies.
 
+[GitHub Repository](https://github.com/kusaljr/dependency-injection-kit)
+
 ## Features
 
 ## Automatic Dependency Injection
