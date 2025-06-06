@@ -20,3 +20,17 @@ export { Injectable } from "../decorators/injectable";
 export { useInterceptor } from "../decorators/middleware";
 
 export { createApp } from "../global/create_app";
+
+export {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  GatewayTimeoutException,
+  HttpException,
+  InternalServerErrorException,
+  MethodNotAllowedException,
+  NotFoundException,
+  ServiceUnavailableException,
+  TooManyRequestsException,
+  UnauthorizedException,
+} from "./exceptions";

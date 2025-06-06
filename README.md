@@ -87,22 +87,19 @@ export class ExampleController {
 ```
 
 Available exceptions include:
-- `BadRequestException`
-- `UnauthorizedException`
-- `ForbiddenException`
-- `NotFoundException`
-- `MethodNotAllowedException`
-- `InternalServerErrorException`
-- `ServiceUnavailableException`
-- `GatewayTimeoutException`
-- `ConflictException`
-- `TooManyRequestsException`
-- `UnprocessableEntityException`
-- `NotImplementedException`
-- `HttpException`
-- `HttpStatusException`
-- `HttpErrorException`
-- `HttpExceptionFilter`
+- `BadRequestException` ✅
+- `UnauthorizedException` ✅
+- `ForbiddenException` ✅
+- `NotFoundException` ✅
+- `MethodNotAllowedException` ✅
+- `InternalServerErrorException` ✅
+- `ServiceUnavailableException` ✅
+- `GatewayTimeoutException` ✅
+- `ConflictException` ✅
+- `TooManyRequestsException` ✅
+- `UnprocessableEntityException` ✅
+- `NotImplementedException` ✅
+- `HttpException` ✅
 
 ### Middleware Injection
 
