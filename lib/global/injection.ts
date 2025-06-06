@@ -2,18 +2,21 @@
 // It registers all @Injectable and @Socket classes with the DI container.
 // Generated on: 2025-05-30T05:52:03.239Z
 
-import { ChatGateway } from '../../src/gateways/socket.gateway';
-import { UserController } from '../../src/user/user.controller';
-import { UserService } from '../../src/user/user.service';
+import { AuthGuard } from "src/user/jwt-middleware";
+import { ChatGateway } from "../../src/gateways/socket.gateway";
+import { UserController } from "../../src/user/user.controller";
+import { UserService } from "../../src/user/user.service";
 
-import { Container } from './container';
+import { Container } from "./container";
 
 const container = Container.getInstance();
 
 container.register(ChatGateway);
 container.register(UserService);
 container.register(UserController);
+container.register(AuthGuard);
 
 export const chatGateway = container.resolve(ChatGateway);
 export const userService = container.resolve(UserService);
 export const userController = container.resolve(UserController);
+export const authGuard = container.resolve(AuthGuard);

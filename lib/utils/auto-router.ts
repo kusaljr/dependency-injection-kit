@@ -1,4 +1,3 @@
-import { NextFunction, Request, Response } from "express";
 import {
   HttpMethod,
   InterceptorFunction,
@@ -11,6 +10,8 @@ import { Constructor, Container } from "../global/container";
 import { findControllerFiles } from "./find-controller";
 
 import { BunServe, Context } from "@express-di-kit/bun-engine";
+import { HttpException } from "@express-di-kit/common/exceptions";
+import { CanActivate, evaluateGuards } from "@express-di-kit/common/middleware";
 import { getZodSchemaForDto } from "@express-di-kit/validator/utils";
 import * as fs from "fs";
 import * as path from "path";
@@ -21,7 +22,7 @@ import { generateReactView } from "./static/generate-react-view";
 import { transpileReactView } from "./static/transpiler";
 
 const wrapMiddleware = (fn: any) => {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return (req: any, res: any, next: any) => {
     return fn(req, res, next);
   };
 };
@@ -265,17 +266,55 @@ export async function registerControllers(
                   }:`,
                   error
                 );
-                if (!ctx.headersSent) {
-                  ctx.status(500).json({ error: "Internal Server Error" });
+                if (error instanceof HttpException) {
+                  ctx.status(error.status).json(error.toJson());
+                } else {
+                  if (!ctx.headersSent) {
+                    ctx.status(500).json({ error: "Internal Server Error" });
+                  }
                 }
+              }
+            };
+
+            const classGuards: (new () => CanActivate)[] =
+              Reflect.getMetadata("classGuards", ControllerClass) || [];
+            const methodGuards: (new () => CanActivate)[] =
+              Reflect.getMetadata(
+                "methodGuards",
+                ControllerClass.prototype,
+                route.handlerName
+              ) || [];
+
+            const guardMiddleware = async (req: any, res: any, next: any) => {
+              try {
+                const allGuards = [...classGuards, ...methodGuards];
+                const passed = await evaluateGuards(allGuards, req, res);
+                if (!passed) {
+                  return res
+                    .status(403)
+                    .json({ message: "Forbidden by guard." });
+                }
+                next();
+              } catch (err: any) {
+                console.error(
+                  `Guard error in ${ControllerClass.name}.${String(
+                    route.handlerName
+                  )}:`,
+                  err.message || err
+                );
+                if (res?.status && res?.json) {
+                  return res.status(403).json({
+                    ...err,
+                  });
+                }
+                next();
               }
             };
 
             app[route.method as keyof BunServe](
               (prefix + route.path) as any,
-              ...[...controllerInterceptors, ...methodInterceptors].map(
-                wrapMiddleware
-              ),
+              guardMiddleware,
+
               finalRouteHandler.bind(instance)
             );
 

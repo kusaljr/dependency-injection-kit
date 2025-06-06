@@ -9,13 +9,14 @@ import {
   Req,
 } from "@express-di-kit/common";
 
+import { UseGuards } from "@express-di-kit/common/middleware";
 import { React } from "@express-di-kit/static";
-import { IsAuthenticated } from "./jwt-middleware";
+import { AuthGuard } from "./jwt-middleware";
 import { UserDto } from "./user.dto";
 import { UserService } from "./user.service";
 
 @Controller("/user")
-@IsAuthenticated()
+@UseGuards(AuthGuard)
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
