@@ -21,12 +21,6 @@ import { WebSocketServer } from "../ops/socket/web-socket";
 import { generateReactView } from "./static/generate-react-view";
 import { transpileReactView } from "./static/transpiler";
 
-const wrapMiddleware = (fn: any) => {
-  return (req: any, res: any, next: any) => {
-    return fn(req, res, next);
-  };
-};
-
 const colorText = {
   green: (text: string) => `\x1b[32m${text}\x1b[0m`,
   orange: (text: string) => `\x1b[33m${text}\x1b[0m`,

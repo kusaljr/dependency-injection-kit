@@ -15,6 +15,7 @@ const EXCLUDED_PATTERNS = [
   "src/app.ts",
   "lib/utils/generate-injection.ts",
   "lib/global/injection.ts",
+  "**/*.dto.ts",
 ];
 
 // Helper to check if a file should be excluded
@@ -98,11 +99,36 @@ function generateInjectionFile() {
 
         const paramTypes: any[] =
           Reflect.getMetadata("design:paramtypes", ClassRef) || [];
-
         const dependencies = new Set<string>();
+
+        // Add constructor dependencies
         for (const dep of paramTypes) {
           if (typeof dep === "function" && dep.name !== "Object") {
             dependencies.add(dep.name);
+          }
+        }
+
+        // Add guards from @UseGuards decorator metadata
+
+        // Collect guards from class-level metadata
+        const classGuards: any[] =
+          Reflect.getMetadata("guards", ClassRef) || [];
+
+        // Collect guards from method-level metadata
+        const methodNames = Object.getOwnPropertyNames(ClassRef.prototype);
+        for (const methodName of methodNames) {
+          if (methodName === "constructor") continue;
+          const methodGuards: any[] =
+            Reflect.getMetadata("guards", ClassRef.prototype, methodName) || [];
+          classGuards.push(...methodGuards);
+        }
+
+        for (const guardClass of classGuards) {
+          if (
+            typeof guardClass === "function" &&
+            guardClass.name !== "Object"
+          ) {
+            dependencies.add(guardClass.name);
           }
         }
 
