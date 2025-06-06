@@ -74,12 +74,16 @@ Example:
 ```typescript
 import { useInterceptor } from "express-di-kit/common";
 
-export const MiddlewareFunction = () =>
-  useInterceptor((req: Request, res: Response, next: NextFunction) => {
-    // Simulate user authentication
-    (req as any).user = { id: 1, name: "Test User" };
-    next();
-  });
+@Injectable()
+export class AuthGuard implements CanActivate {
+  async canActivate(req: any) {
+    throw new ForbiddenException(
+      "You are not authorized to access this resource. Please log in."
+    );
+    return true;
+  }
+}
+
 
 import { Controller, Get } from "express-di-kit/common";
 @Controller("/example")
@@ -87,7 +91,7 @@ export class ExampleController {
   constructor(private exampleService: ExampleService) {}
 
   @Get("/")
-  @MiddlewareFunction()
+  @UseGuards(AuthGuard)
   async getExample(req: Request, res: Response) {
     // Access the user from the request object
     const user = (req as any).user;
