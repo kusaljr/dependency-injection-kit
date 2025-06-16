@@ -1,36 +1,36 @@
 import { NextFunction, Request, Response } from "express";
 import "reflect-metadata";
 
+export interface ConfigurableInterceptor<C = any> {
+  configure(config: C): void;
+}
+
 export type InterceptorFunction = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => void;
 
-// This returns a decorator (class or method)
-export function useInterceptor(
-  interceptor: InterceptorFunction
+export type InterceptorClass<C = any> = new (
+  ...args: any[]
+) => ConfigurableInterceptor<C>;
+
+export type InterceptorClassWithConfig<C> = [InterceptorClass<C>, C];
+
+export function UseInterceptor<C>(
+  interceptor:
+    | InterceptorFunction
+    | InterceptorClass<C>
+    | InterceptorClassWithConfig<C>
 ): ClassDecorator & MethodDecorator {
   return function (target: any, propertyKey?: string | symbol) {
-    if (propertyKey) {
-      // Method-level
-      const existing =
-        Reflect.getMetadata("methodMiddlewares", target, propertyKey) || [];
-      Reflect.defineMetadata(
-        "methodMiddlewares",
-        [...existing, interceptor],
-        target,
-        propertyKey
-      );
-    } else {
-      // Class-level
-      const existing =
-        Reflect.getMetadata("controllerInterceptors", target) || [];
-      Reflect.defineMetadata(
-        "controllerInterceptors",
-        [...existing, interceptor],
-        target
-      );
-    }
+    const key = propertyKey ? "methodMiddlewares" : "controllerInterceptors";
+    const existing = Reflect.getMetadata(key, target, propertyKey!) || [];
+    Reflect.defineMetadata(
+      key,
+      [...existing, interceptor],
+      target,
+      propertyKey!
+    );
   };
 }

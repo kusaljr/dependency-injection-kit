@@ -18,8 +18,8 @@ import * as path from "path";
 import { SOCKET_METADATA_KEY } from "../socket/decorator";
 import { REACT_METADATA } from "../static/decorator";
 import { colorMethod, colorText } from "./colors";
+import { generateDynamicHtml } from "./static/generate-dynamic-html";
 import { generateReactView } from "./static/generate-react-view";
-import { transpileReactView } from "./static/transpiler";
 
 // Helper to recursively find gateway files (*.gateway.ts or *.gateway.js)
 function findGatewayFiles(dir: string): string[] {
@@ -193,23 +193,16 @@ export async function registerControllers(
                   instance,
                   args
                 );
-
                 if (hasReactMetadata) {
                   const handler = String(route.handlerName);
-                  const tsxFile = path.join(
-                    path.dirname(filePath),
-                    "views",
-                    `${ControllerClass.name}.${handler}.tsx`
-                  );
-                  // get original response of this handler
-                  const originalResponse = ctx.body || result;
-                  const html = await transpileReactView(
-                    tsxFile,
-                    originalResponse
-                  );
-                  if (html.success) {
-                    return ctx.file(html.path as string);
-                  }
+                  const jsFileName = `${ControllerClass.name}.${handler}.entry.js`;
+
+                  const props = ctx.body || result;
+
+                  const html = generateDynamicHtml(jsFileName, props);
+
+                  ctx.setHeader("Content-Type", "text/html; charset=utf-8");
+                  ctx.send(html);
                 } else {
                   if (result !== undefined) {
                     ctx.json(result);

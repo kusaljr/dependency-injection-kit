@@ -16,7 +16,7 @@ export { RateLimitGuard } from "../ops/rate-limit/rate-limit";
 
 export { Injectable } from "../decorators/injectable";
 
-export { useInterceptor } from "../decorators/middleware";
+export { UseInterceptor } from "../decorators/middleware";
 
 export { createApp } from "../global/create_app";
 

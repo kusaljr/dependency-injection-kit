@@ -1,13 +1,21 @@
-import { Injectable } from "@express-di-kit/common";
+import { ConfigurableInterceptor } from "@express-di-kit/decorators/middleware";
 
 enum CircuitBreakerStatus {
   CLOSED = "CLOSED",
   OPEN = "OPEN",
   HALF_OPEN = "HALF_OPEN",
 }
+export interface CircuitBreakerConfig {
+  serviceFn: () => Promise<any>;
+  failureThreshold?: number;
+  fallbackFn?: () => Promise<any>;
+  cooldownTime?: number;
+  enableLogging?: boolean;
+}
 
-@Injectable()
-export class CircuitBreakerClass<T = any> {
+export class CircuitBreakerClass<T = any>
+  implements ConfigurableInterceptor<CircuitBreakerConfig>
+{
   private failureCount = 0;
   private status: CircuitBreakerStatus = CircuitBreakerStatus.CLOSED;
 
@@ -21,13 +29,7 @@ export class CircuitBreakerClass<T = any> {
 
   constructor() {}
 
-  public configure(options: {
-    serviceFn: () => Promise<T>;
-    failureThreshold?: number;
-    fallbackFn?: () => Promise<T>;
-    cooldownTime?: number;
-    enableLogging?: boolean;
-  }) {
+  configure(options: CircuitBreakerConfig): void {
     this.serviceFn = options.serviceFn;
     if (options.failureThreshold !== undefined)
       this.failureThreshold = options.failureThreshold;
