@@ -1,8 +1,5 @@
 import "reflect-metadata";
-import {
-  SOCKET_EVENTS_KEY,
-  SOCKET_METADATA_KEY,
-} from "../ops/socket/decorator";
+import { SOCKET_EVENTS_KEY, SOCKET_METADATA_KEY } from "../socket/decorator";
 
 interface AsyncAPIOptions {
   title: string;

@@ -1,6 +1,5 @@
 import {
   HttpMethod,
-  InterceptorFunction,
   MethodInterceptor,
   ParameterDefinition,
   ParameterType,
@@ -12,52 +11,15 @@ import { findControllerFiles } from "./find-controller";
 import { BunServe, Context } from "@express-di-kit/bun-engine";
 import { HttpException } from "@express-di-kit/common/exceptions";
 import { CanActivate, evaluateGuards } from "@express-di-kit/common/middleware";
+import { WebSocketServer } from "@express-di-kit/socket/web-socket";
 import { getZodSchemaForDto } from "@express-di-kit/validator/utils";
 import * as fs from "fs";
 import * as path from "path";
-import { REACT_METADATA } from "../ops/react/decorator";
-import { SOCKET_METADATA_KEY } from "../ops/socket/decorator";
-import { WebSocketServer } from "../ops/socket/web-socket";
+import { SOCKET_METADATA_KEY } from "../socket/decorator";
+import { REACT_METADATA } from "../static/decorator";
+import { colorMethod, colorText } from "./colors";
 import { generateReactView } from "./static/generate-react-view";
 import { transpileReactView } from "./static/transpiler";
-
-const colorText = {
-  green: (text: string) => `\x1b[32m${text}\x1b[0m`,
-  orange: (text: string) => `\x1b[33m${text}\x1b[0m`,
-  yellow: (text: string) => `\x1b[33m${text}\x1b[0m`,
-  red: (text: string) => `\x1b[31m${text}\x1b[0m`,
-  cyan: (text: string) => `\x1b[36m${text}\x1b[0m`,
-  magenta: (text: string) => `\x1b[35m${text}\x1b[0m`,
-  white: (text: string) => `\x1b[37m${text}\x1b[0m`,
-  bold: (text: string) => `\x1b[1m${text}\x1b[0m`,
-  underline: (text: string) => `\x1b[4m${text}\x1b[0m`,
-  inverse: (text: string) => `\x1b[7m${text}\x1b[0m`,
-  strikethrough: (text: string) => `\x1b[9m${text}\x1b[0m`,
-  gray: (text: string) => `\x1b[90m${text}\x1b[0m`,
-  black: (text: string) => `\x1b[30m${text}\x1b[0m`,
-  bgGreen: (text: string) => `\x1b[42m${text}\x1b[0m`,
-  bgRed: (text: string) => `\x1b[41m${text}\x1b[0m`,
-  bgYellow: (text: string) => `\x1b[43m${text}\x1b[0m`,
-  bgBlue: (text: string) => `\x1b[44m${text}\x1b[0m`,
-  bgCyan: (text: string) => `\x1b[46m${text}\x1b[0m`,
-};
-
-const colorMethod = (method: string): string => {
-  switch (method.toUpperCase()) {
-    case "GET":
-      return colorText.green(method.toUpperCase());
-    case "POST":
-      return colorText.cyan(method.toUpperCase());
-    case "PATCH":
-      return colorText.magenta(method.toUpperCase());
-    case "DELETE":
-      return colorText.red(method.toUpperCase());
-    case "PUT":
-      return colorText.yellow(method.toUpperCase());
-    default:
-      return colorText.white(method.toUpperCase());
-  }
-};
 
 // Helper to recursively find gateway files (*.gateway.ts or *.gateway.js)
 function findGatewayFiles(dir: string): string[] {
@@ -127,8 +89,8 @@ export async function registerControllers(
           any
         >;
 
-        const controllerInterceptors: InterceptorFunction[] =
-          Reflect.getMetadata("controllerInterceptors", ControllerClass) || [];
+        // const controllerInterceptors: InterceptorFunction[] =
+        //   Reflect.getMetadata("controllerInterceptors", ControllerClass) || [];
 
         routes.sort((a, b) => {
           const aHasParam = a.path.includes(":");
@@ -281,13 +243,18 @@ export async function registerControllers(
 
             const guardMiddleware = async (req: any, res: any, next: any) => {
               try {
-                const allGuards = [...classGuards, ...methodGuards];
-                const passed = await evaluateGuards(allGuards, req, res);
+                const guardClasses = [...classGuards, ...methodGuards];
+                const guardInstances: CanActivate[] = guardClasses.map(
+                  (GuardClass) => container.resolve(GuardClass)
+                );
+
+                const passed = await evaluateGuards(guardInstances, req, res);
                 if (!passed) {
                   return res
                     .status(403)
                     .json({ message: "Forbidden by guard." });
                 }
+
                 next();
               } catch (err: any) {
                 console.error(
@@ -297,9 +264,7 @@ export async function registerControllers(
                   err.message || err
                 );
                 if (res?.status && res?.json) {
-                  return res.status(403).json({
-                    ...err,
-                  });
+                  return res.status(403).json({ ...err });
                 }
                 next();
               }

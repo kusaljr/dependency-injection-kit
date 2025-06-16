@@ -1,1 +1,1 @@
-export { Socket, Subscribe } from "../ops/socket/decorator";
+export { Socket, Subscribe } from "./decorator";

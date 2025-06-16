@@ -1,1 +1,1 @@
-export { React } from "../ops/react/decorator";
+export { React } from "./decorator";

@@ -47,12 +47,11 @@ export function guardMiddlewareFactory(controller: any, propertyKey: string) {
 }
 
 export async function evaluateGuards(
-  guards: (new () => CanActivate)[],
+  guards: CanActivate[],
   req: any,
   res: any
 ): Promise<boolean> {
-  for (const Guard of guards) {
-    const guardInstance = new Guard();
+  for (const guardInstance of guards) {
     const result = await guardInstance.canActivate(req, res);
     if (!result) return false;
   }

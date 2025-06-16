@@ -1,40 +1,52 @@
+import { Injectable } from "@express-di-kit/common";
+
 enum CircuitBreakerStatus {
   CLOSED = "CLOSED",
   OPEN = "OPEN",
   HALF_OPEN = "HALF_OPEN",
 }
 
+@Injectable()
 export class CircuitBreakerClass<T = any> {
   private failureCount = 0;
   private status: CircuitBreakerStatus = CircuitBreakerStatus.CLOSED;
 
-  private readonly serviceFn: () => Promise<T>;
-  private readonly failureThreshold: number;
-  private readonly cooldownTime: number;
-  private readonly fallbackFn: () => Promise<T>;
-  private readonly enableLogging: boolean;
+  private serviceFn?: () => Promise<T>;
+  private failureThreshold: number = 5;
+  private cooldownTime: number = 10000;
+  private fallbackFn: () => Promise<T> = async () => {
+    throw new Error("Fallback executed");
+  };
+  private enableLogging: boolean = false;
 
-  constructor(
-    serviceFn: () => Promise<T>,
-    failureThreshold: number = 5,
-    fallbackFn: () => Promise<T> = async () => {
-      throw new Error("Fallback executed");
-    },
-    cooldownTime: number = 10000,
-    enableLogging: boolean = false
-  ) {
-    this.serviceFn = serviceFn;
-    this.failureThreshold = failureThreshold;
-    this.cooldownTime = cooldownTime;
-    this.fallbackFn = fallbackFn;
-    this.enableLogging = enableLogging;
+  constructor() {}
+
+  public configure(options: {
+    serviceFn: () => Promise<T>;
+    failureThreshold?: number;
+    fallbackFn?: () => Promise<T>;
+    cooldownTime?: number;
+    enableLogging?: boolean;
+  }) {
+    this.serviceFn = options.serviceFn;
+    if (options.failureThreshold !== undefined)
+      this.failureThreshold = options.failureThreshold;
+    if (options.cooldownTime !== undefined)
+      this.cooldownTime = options.cooldownTime;
+    if (options.fallbackFn !== undefined) this.fallbackFn = options.fallbackFn;
+    if (options.enableLogging !== undefined)
+      this.enableLogging = options.enableLogging;
 
     this.log(
-      `\x1b[33mCircuit breaker initialized. Threshold: ${this.failureThreshold}, Cooldown: ${this.cooldownTime}ms\x1b[0m`
+      `\x1b[33mCircuit breaker configured. Threshold: ${this.failureThreshold}, Cooldown: ${this.cooldownTime}ms\x1b[0m`
     );
   }
 
   public async execute(): Promise<T> {
+    if (!this.serviceFn) {
+      throw new Error("CircuitBreaker serviceFn is not configured.");
+    }
+
     switch (this.status) {
       case CircuitBreakerStatus.OPEN:
         this.log("\x1b[31mCircuit is OPEN. Rejecting call.\x1b[0m");
@@ -51,7 +63,7 @@ export class CircuitBreakerClass<T = any> {
 
   private async tryService(): Promise<T> {
     try {
-      const result = await this.serviceFn();
+      const result = await this.serviceFn!();
       this.reset();
       return result;
     } catch (error) {
@@ -69,7 +81,7 @@ export class CircuitBreakerClass<T = any> {
   private async tryHalfOpen(): Promise<T> {
     this.log("Circuit is HALF_OPEN. Trying one request.");
     try {
-      const result = await this.serviceFn();
+      const result = await this.serviceFn!();
       this.reset();
       return result;
     } catch (error) {
@@ -119,38 +131,4 @@ export class CircuitBreakerClass<T = any> {
   public getStatus(): CircuitBreakerStatus {
     return this.status;
   }
-}
-
-export function CircuitBreaker<T = any>({
-  failureThreshold = 5,
-  fallbackFn = async () => {
-    throw new Error("Fallback executed");
-  },
-  cooldownTime = 10000,
-  enableLogging = false,
-}: {
-  failureThreshold?: number;
-  fallbackFn?: () => Promise<T>;
-  cooldownTime?: number;
-  enableLogging?: boolean;
-}) {
-  return function (
-    target: any,
-    propertyKey: string,
-    descriptor: PropertyDescriptor
-  ) {
-    const originalMethod = descriptor.value;
-
-    const breaker = new CircuitBreakerClass<T>(
-      () => originalMethod.apply(target),
-      failureThreshold,
-      fallbackFn,
-      cooldownTime,
-      enableLogging
-    );
-
-    descriptor.value = function (...args: any[]) {
-      return breaker.execute();
-    };
-  };
 }

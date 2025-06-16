@@ -105,6 +105,7 @@ type ExpressReq = {
   originalUrl?: string;
   baseUrl?: string; // Important for nested routers/middleware
   path: string;
+  ip: string; // This can be set to ctx.req.headers['x-forwarded-for'] or similar
   method: string;
   headers: Record<string, string | string[]>;
   query: Record<string, string>;
@@ -547,6 +548,7 @@ export class BunServe {
       req: {
         // Construct ExpressReq from Bun's Request and parsed data
         url: bunRequest.url,
+        ip: bunRequest.headers.get("x-forwarded-for") || "::1", // Default to localhost if not set
         originalUrl: bunRequest.url,
         baseUrl: "", // This might need more logic for nested routers
         path: url.pathname.split("?")[0], // Normalized path
