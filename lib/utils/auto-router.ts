@@ -100,6 +100,11 @@ export async function registerControllers(
           return 0;
         });
 
+        console.log("");
+        console.log(
+          `------ ${colorText.green(ControllerClass.name)} Routes -------`
+        );
+
         routes.forEach((route: RouteDefinition) => {
           const originalControllerMethod = instance[String(route.handlerName)];
 
@@ -289,6 +294,8 @@ export async function registerControllers(
             );
           }
         });
+
+        console.log("");
       }
     }
 
