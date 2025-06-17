@@ -6,17 +6,15 @@ import {
   Patch,
   Post,
   Put,
-  RateLimitGuard,
   Req,
 } from "@express-di-kit/common";
 
-import { UseGuards } from "@express-di-kit/common/middleware";
 import { React } from "@express-di-kit/static";
+import { pageResponse } from "@express-di-kit/static/decorator";
 import { UserDto } from "./user.dto";
 import { UserService } from "./user.service";
 
 @Controller("/user")
-@UseGuards(RateLimitGuard)
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
@@ -28,25 +26,33 @@ export class UserController {
   @Get("/list")
   @React()
   getUserList(@Req req: Request & { user: { id: number; name: string } }) {
-    return {
-      data: {
+    return pageResponse(
+      {
+        title: "User List",
+        description: "List of all users",
+      },
+      {
         users: this.userService.getUserList(),
         currentUser: req.user,
-      },
-    };
+      }
+    );
   }
 
   @Get("/details/:id")
   @React()
   getUserDetails(@Req req: Request & { params: { id: string } }) {
-    return {
-      data: {
+    return pageResponse(
+      {
+        title: "User Details",
+        description: "Details of a specific user",
+      },
+      {
         user: {
           id: req.params.id,
           name: "John Doe",
         },
-      },
-    };
+      }
+    );
   }
 
   @Post("/create")

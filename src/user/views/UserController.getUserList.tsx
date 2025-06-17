@@ -24,7 +24,7 @@ export default function UserController_getUserList({ props }: { props: any }) {
         User List from /user/list
       </h1>
       <SadComponent />
-      <Table dataSource={props.data.users} columns={columns} />;
+      <Table dataSource={props.data.users} columns={columns} />
     </div>
   );
 }

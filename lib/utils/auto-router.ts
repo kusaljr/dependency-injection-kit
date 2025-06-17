@@ -119,11 +119,6 @@ export async function registerControllers(
 
           // Generate React view file if metadata exists
           if (hasReactMetadata) {
-            console.log(
-              `Generating React view for ${ControllerClass.name}.${String(
-                route.handlerName
-              )} at ${filePath}`
-            );
             generateReactView(
               ControllerClass.name,
               String(route.handlerName),
@@ -204,7 +199,9 @@ export async function registerControllers(
 
                   const props = ctx.body || result;
 
-                  const html = generateDynamicHtml(jsFileName, props);
+                  const seoMeta = result.head;
+
+                  const html = generateDynamicHtml(jsFileName, props, seoMeta);
 
                   ctx.setHeader("Content-Type", "text/html; charset=utf-8");
                   ctx.send(html);

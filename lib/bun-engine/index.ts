@@ -1,3 +1,5 @@
+import { SeoMeta } from "@express-di-kit/static/decorator";
+
 export interface Context {
   req: ExpressReq;
   _response?: Response;
@@ -5,6 +7,7 @@ export interface Context {
   query: Record<string, string>;
   body?: any; // The parsed body will be stored here
   locals: Record<string, any>;
+  seoMeta?: SeoMeta;
 
   statusCode: number;
   headers: Headers;
