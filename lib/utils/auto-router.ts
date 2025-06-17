@@ -119,6 +119,11 @@ export async function registerControllers(
 
           // Generate React view file if metadata exists
           if (hasReactMetadata) {
+            console.log(
+              `Generating React view for ${ControllerClass.name}.${String(
+                route.handlerName
+              )} at ${filePath}`
+            );
             generateReactView(
               ControllerClass.name,
               String(route.handlerName),

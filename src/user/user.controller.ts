@@ -36,6 +36,19 @@ export class UserController {
     };
   }
 
+  @Get("/details/:id")
+  @React()
+  getUserDetails(@Req req: Request & { params: { id: string } }) {
+    return {
+      data: {
+        user: {
+          id: req.params.id,
+          name: "John Doe",
+        },
+      },
+    };
+  }
+
   @Post("/create")
   createUser(@Body() body: UserDto) {
     console.log("Creating user with data:", body);

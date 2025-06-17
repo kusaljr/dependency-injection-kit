@@ -38,25 +38,11 @@ export default function ${componentName}({props}:{props: any}) {
         <h2>Server Data:</h2>
         <pre>{JSON.stringify(props, null, 2)}</pre>
       </div>
-      
-      {/* Add your custom JSX here */}
-      {props.title && <h2>{props.title}</h2>}
-      {props.description && <p>{props.description}</p>}
-      {props.users && (
-        <div>
-          <h3>Users:</h3>
-          <ul>
-            {props.users.map((user, index) => (
-              <li key={index}>{user.name || user}</li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
 `.trim();
 
-  fs.writeFileSync(tsxFileName, template, "utf8");
+  fs.writeFileSync(tsxFilePath, template, "utf8");
   console.log(`✅ Generated React view: ${tsxFileName}`);
 }
