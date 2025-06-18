@@ -6,6 +6,7 @@
   "scripts": {
     "test": "jest --silent true --detectOpenHandles",
     "start:app": "ts-node src/app.ts",
+    "orm": "bun run lib/orm",
     "dev": "bun run lib/utils/generate-injection.ts && bun run lib/utils/static/build-react-views.ts && bun run lib/utils/static/generate-react-view.ts && bun run src/app.ts"
   },
   "keywords": [],
