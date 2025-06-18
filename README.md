@@ -108,15 +108,20 @@ You can also inject services into your middleware functions. This allows you to 
 Example:
 
 ```typescript
-import { useInterceptor } from "express-di-kit/common";
+import { CallHandler, DiKitInterceptor, ExecutionContext} from "express-di-kit/common";
 
 @Injectable()
-export class AuthGuard implements CanActivate {
-  async canActivate(req: any) {
+export class AuthGuard implements DiKitInterceptor {
+  intercept(context: ExecutionContext, next: CallHandler): Promise<any> {
+    const httpContext = context.switchToHttp();
+    const res = httpContext.getResponse();
+    const req = httpContext.getRequest();
+
     throw new ForbiddenException(
       "You are not authorized to access this resource. Please log in."
     );
-    return true;
+    // OR
+    return next.handle()
   }
 }
 
