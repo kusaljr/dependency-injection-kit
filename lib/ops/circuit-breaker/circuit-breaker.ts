@@ -1,136 +1,101 @@
-import { ConfigurableInterceptor } from "@express-di-kit/decorators/middleware";
+import {
+  Injectable,
+  ServiceUnavailableException,
+} from "@express-di-kit/common";
+import {
+  CallHandler,
+  DiKitInterceptor,
+  ExecutionContext,
+} from "@express-di-kit/global/interceptor";
 
-enum CircuitBreakerStatus {
+enum State {
   CLOSED = "CLOSED",
   OPEN = "OPEN",
   HALF_OPEN = "HALF_OPEN",
 }
-export interface CircuitBreakerConfig {
-  serviceFn: () => Promise<any>;
-  failureThreshold?: number;
-  fallbackFn?: () => Promise<any>;
-  cooldownTime?: number;
-  enableLogging?: boolean;
-}
 
-export class CircuitBreakerClass<T = any>
-  implements ConfigurableInterceptor<CircuitBreakerConfig>
-{
+@Injectable()
+export class CircuitBreakerInterceptor implements DiKitInterceptor {
+  private state: State = State.CLOSED;
   private failureCount = 0;
-  private status: CircuitBreakerStatus = CircuitBreakerStatus.CLOSED;
+  private successCount = 0;
+  private lastFailureTime = 0;
 
-  private serviceFn?: () => Promise<T>;
-  private failureThreshold: number = 5;
-  private cooldownTime: number = 10000;
-  private fallbackFn: () => Promise<T> = async () => {
-    throw new Error("Fallback executed");
-  };
-  private enableLogging: boolean = false;
+  private readonly coolDownTime: number = 5000;
+  private readonly failureThreshold: number = 5;
+  private readonly successThreshold: number = 3;
 
-  constructor() {}
+  async intercept(context: ExecutionContext, next: CallHandler): Promise<any> {
+    const now = Date.now();
+    console.log(`[CircuitBreaker] Current State: ${this.state}`);
 
-  configure(options: CircuitBreakerConfig): void {
-    this.serviceFn = options.serviceFn;
-    if (options.failureThreshold !== undefined)
-      this.failureThreshold = options.failureThreshold;
-    if (options.cooldownTime !== undefined)
-      this.cooldownTime = options.cooldownTime;
-    if (options.fallbackFn !== undefined) this.fallbackFn = options.fallbackFn;
-    if (options.enableLogging !== undefined)
-      this.enableLogging = options.enableLogging;
-
-    this.log(
-      `\x1b[33mCircuit breaker configured. Threshold: ${this.failureThreshold}, Cooldown: ${this.cooldownTime}ms\x1b[0m`
-    );
-  }
-
-  public async execute(): Promise<T> {
-    if (!this.serviceFn) {
-      throw new Error("CircuitBreaker serviceFn is not configured.");
-    }
-
-    switch (this.status) {
-      case CircuitBreakerStatus.OPEN:
-        this.log("\x1b[31mCircuit is OPEN. Rejecting call.\x1b[0m");
-        return this.executeFallback();
-
-      case CircuitBreakerStatus.HALF_OPEN:
-        return this.tryHalfOpen();
-
-      case CircuitBreakerStatus.CLOSED:
-      default:
-        return this.tryService();
-    }
-  }
-
-  private async tryService(): Promise<T> {
-    try {
-      const result = await this.serviceFn!();
-      this.reset();
-      return result;
-    } catch (error) {
-      this.failureCount++;
-      this.log(`Service failed. Failure count: ${this.failureCount}`);
-
-      if (this.failureCount >= this.failureThreshold) {
-        this.open();
+    if (this.state === State.OPEN) {
+      const elapsed = now - this.lastFailureTime;
+      if (elapsed >= this.coolDownTime) {
+        console.log(
+          `[CircuitBreaker] Cooldown expired (${elapsed}ms), transitioning to HALF_OPEN`
+        );
+        this.state = State.HALF_OPEN;
+      } else {
+        console.warn(
+          `[CircuitBreaker] Circuit is OPEN, rejecting call. ${
+            this.coolDownTime - elapsed
+          }ms remaining`
+        );
+        throw new ServiceUnavailableException("Circuit breaker: OPEN");
       }
-
-      throw error;
     }
-  }
 
-  private async tryHalfOpen(): Promise<T> {
-    this.log("Circuit is HALF_OPEN. Trying one request.");
     try {
-      const result = await this.serviceFn!();
-      this.reset();
+      const result = await next.handle();
+      this.handleSuccess();
       return result;
-    } catch (error) {
-      this.open();
-      throw error;
+    } catch (err) {
+      this.handleFailure();
+      throw err;
     }
   }
 
-  private open() {
-    this.status = CircuitBreakerStatus.OPEN;
-    this.log("Circuit breaker OPENED. Starting cooldown.");
+  private handleFailure() {
+    this.failureCount++;
+    this.lastFailureTime = Date.now();
+    console.error(
+      `[CircuitBreaker] Failure occurred. Count: ${this.failureCount}`
+    );
 
-    setTimeout(() => {
-      this.status = CircuitBreakerStatus.HALF_OPEN;
-      this.log("Cooldown ended. Circuit is now HALF_OPEN.");
-    }, this.cooldownTime);
+    if (this.failureCount >= this.failureThreshold) {
+      this.state = State.OPEN;
+      console.warn(
+        `[CircuitBreaker] Failure threshold reached (${this.failureThreshold}). Transitioning to OPEN`
+      );
+    }
+  }
+
+  private handleSuccess() {
+    if (this.state === State.HALF_OPEN) {
+      this.successCount++;
+      console.log(
+        `[CircuitBreaker] HALF_OPEN success. Success count: ${this.successCount}/${this.successThreshold}`
+      );
+
+      if (this.successCount >= this.successThreshold) {
+        console.log(
+          `[CircuitBreaker] Success threshold met. Resetting to CLOSED.`
+        );
+        this.reset();
+      }
+    } else {
+      console.log(
+        `[CircuitBreaker] Successful call in state: ${this.state}. Resetting.`
+      );
+      this.reset();
+    }
   }
 
   private reset() {
     this.failureCount = 0;
-    this.status = CircuitBreakerStatus.CLOSED;
-    this.log("Circuit breaker RESET. Status is CLOSED.");
-  }
-
-  private async executeFallback(): Promise<T> {
-    try {
-      this.log("Executing fallback function.");
-      return await this.fallbackFn();
-    } catch (fallbackError) {
-      this.log("Fallback function failed.");
-      throw new Error("Circuit breaker is open and fallback failed");
-    }
-  }
-
-  private log(message: string) {
-    if (this.enableLogging) {
-      if (this.status === CircuitBreakerStatus.OPEN) {
-        console.error(`\x1b[31m[CircuitBreaker]: ${message}\x1b[0m`);
-      } else if (this.status === CircuitBreakerStatus.HALF_OPEN) {
-        console.warn(`\x1b[33m[CircuitBreaker]: ${message}\x1b[0m`);
-      } else {
-        console.log(`\x1b[32m[CircuitBreaker]: ${message}\x1b[0m`);
-      }
-    }
-  }
-
-  public getStatus(): CircuitBreakerStatus {
-    return this.status;
+    this.successCount = 0;
+    this.state = State.CLOSED;
+    console.log(`[CircuitBreaker] Reset to CLOSED state.`);
   }
 }

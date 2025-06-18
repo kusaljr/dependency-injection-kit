@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,22 +11,25 @@ import {
 } from "@express-di-kit/common";
 
 import { UseInterceptors } from "@express-di-kit/global/interceptor";
-import { RateLimitInterceptor } from "@express-di-kit/ops/rate-limit";
+import { CircuitBreakerInterceptor } from "@express-di-kit/ops/circuit-breaker/circuit-breaker";
 import { React } from "@express-di-kit/static";
 import { pageResponse } from "@express-di-kit/static/decorator";
 import { UserDto } from "./user.dto";
-import { LoggingInterceptor } from "./user.interceptors";
 import { UserService } from "./user.service";
 
 @Controller("/user")
-@UseInterceptors(RateLimitInterceptor)
+// @UseInterceptors(RateLimitInterceptor)
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Get("/profile")
-  @UseInterceptors(LoggingInterceptor)
+  // @UseInterceptors(LoggingInterceptor)
+  @UseInterceptors(CircuitBreakerInterceptor)
   getProfile(@Req req: Request & { user: { id: number; name: string } }) {
-    return this.userService.getUserProfile();
+    // if (Math.random() < 0.5) {
+    throw new BadRequestException("Simulated error for circuit breaker test");
+    // }
+    // return this.userService.getUserProfile();
   }
 
   @Get("/list")

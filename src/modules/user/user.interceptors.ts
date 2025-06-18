@@ -9,6 +9,7 @@ import { colorText } from "@express-di-kit/utils/colors";
 @Injectable()
 export class LoggingInterceptor implements DiKitInterceptor {
   async intercept(context: ExecutionContext, next: CallHandler): Promise<any> {
+    const response = context.switchToHttp().getResponse();
     const now = Date.now();
     try {
       const result = await next.handle();
@@ -18,6 +19,7 @@ export class LoggingInterceptor implements DiKitInterceptor {
           context.switchToHttp().getRequest().url
         )} took ${colorText.green((Date.now() - now).toString())} ms`
       );
+
       return result;
     } catch (error) {
       console.error(`Error after ${Date.now() - now}ms:`, error);
