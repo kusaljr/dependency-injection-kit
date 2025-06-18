@@ -6,22 +6,25 @@ import {
   Patch,
   Post,
   Put,
+  RateLimitGuard,
   Req,
 } from "@express-di-kit/common";
 
-import { UseInterceptor } from "@express-di-kit/global/interceptor";
-import { RateLimitInterceptor } from "@express-di-kit/ops/rate-limit/test";
+import { UseGuards } from "@express-di-kit/common/middleware";
+import { UseInterceptors } from "@express-di-kit/global/interceptor";
 import { React } from "@express-di-kit/static";
 import { pageResponse } from "@express-di-kit/static/decorator";
 import { UserDto } from "./user.dto";
+import { LoggingInterceptor } from "./user.interceptors";
 import { UserService } from "./user.service";
 
 @Controller("/user")
+@UseGuards(RateLimitGuard)
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Get("/profile")
-  @UseInterceptor(RateLimitInterceptor)
+  @UseInterceptors(LoggingInterceptor)
   getProfile(@Req req: Request & { user: { id: number; name: string } }) {
     return this.userService.getUserProfile();
   }

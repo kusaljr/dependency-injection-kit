@@ -1,4 +1,3 @@
-import { NextFunction, Request, Response } from "express";
 import "reflect-metadata";
 
 export enum HttpMethod {
@@ -142,46 +141,5 @@ export function Property(): PropertyDecorator {
       Reflect.getMetadata("dto:properties", target.constructor) || {};
     properties[key] = type;
     Reflect.defineMetadata("dto:properties", properties, target.constructor);
-  };
-}
-
-export type InterceptorFunction = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => void;
-
-export function UseInterceptors(...interceptors: InterceptorFunction[]) {
-  return function <T extends { new (...args: any[]): {} }>(constructor: T) {
-    Reflect.defineMetadata("controllerInterceptors", interceptors, constructor);
-  };
-}
-
-export type MethodInterceptor = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => void | Promise<void>;
-
-export function UseMethodInterceptor(...interceptors: InterceptorFunction[]) {
-  return function (
-    target: any,
-    propertyKey: string | symbol,
-    descriptor: PropertyDescriptor
-  ) {
-    // Retrieve existing method-level interceptors (if any)
-    const existingInterceptors: InterceptorFunction[] =
-      Reflect.getMetadata("methodMiddlewares", target, propertyKey) || [];
-
-    // Add new interceptors
-    const newInterceptors = [...existingInterceptors, ...interceptors];
-
-    // Define or overwrite the metadata for this specific method
-    Reflect.defineMetadata(
-      "methodMiddlewares",
-      newInterceptors,
-      target,
-      propertyKey
-    );
   };
 }

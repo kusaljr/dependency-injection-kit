@@ -145,7 +145,7 @@ function getContentType(path: string): string {
 
 // This function wraps an Express-style middleware (req, res, next)
 // so it can be used within our BunServe (Context, next) chain.
-function wrapExpressMiddleware(
+export function wrapExpressMiddleware(
   expressMiddleware: (
     req: ExpressReq,
     res: ExpressRes,

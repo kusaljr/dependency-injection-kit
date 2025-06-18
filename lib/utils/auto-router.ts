@@ -1,6 +1,7 @@
+// src/app-builder/register-controller.ts
+
 import {
   HttpMethod,
-  MethodInterceptor,
   ParameterDefinition,
   ParameterType,
   RouteDefinition,
@@ -8,15 +9,26 @@ import {
 import { Constructor, Container } from "../global/container";
 import { findControllerFiles } from "./find-controller";
 
-import { BunServe, Context } from "@express-di-kit/bun-engine";
+import {
+  BunServe,
+  Context,
+  Middleware,
+  wrapExpressMiddleware,
+} from "@express-di-kit/bun-engine"; // Ensure wrapExpressMiddleware is imported
 import { HttpException } from "@express-di-kit/common/exceptions";
-import { CanActivate, evaluateGuards } from "@express-di-kit/common/middleware";
+import { CanActivate, evaluateGuards } from "@express-di-kit/common/middleware"; // Corrected to use common/middleware
+import {
+  CallHandler,
+  DiKitInterceptor,
+  ExecutionContext,
+  INTERCEPTOR_METADATA,
+} from "@express-di-kit/global/interceptor";
 import { WebSocketServer } from "@express-di-kit/socket/web-socket";
-import { getZodSchemaForDto } from "@express-di-kit/validator/utils";
 import * as fs from "fs";
 import * as path from "path";
 import { SOCKET_METADATA_KEY } from "../socket/decorator";
 import { REACT_METADATA } from "../static/decorator";
+import { getZodSchemaForDto } from "../validator/utils"; // Corrected path
 import { colorMethod, colorText } from "./colors";
 import { generateDynamicHtml } from "./static/generate-dynamic-html";
 import { generateReactView } from "./static/generate-react-view";
@@ -89,9 +101,7 @@ export async function registerControllers(
           any
         >;
 
-        // const controllerInterceptors: InterceptorFunction[] =
-        //   Reflect.getMetadata("controllerInterceptors", ControllerClass) || [];
-
+        // Sort routes to prioritize static paths over dynamic paths (with params)
         routes.sort((a, b) => {
           const aHasParam = a.path.includes(":");
           const bHasParam = b.path.includes(":");
@@ -134,12 +144,36 @@ export async function registerControllers(
 
           // Define the single route handler for both JSON API and React View
           if (Object.values(HttpMethod).includes(route.method as HttpMethod)) {
-            const methodInterceptors: MethodInterceptor[] =
+            // Retrieve regular route-specific middlewares (BunServe's Middleware type)
+            const methodMiddlewares: Middleware[] = // Changed MethodInterceptor to Middleware
               Reflect.getMetadata(
-                "methodMiddlewares",
+                "methodMiddlewares", // Assuming this metadata key is for regular BunServe middlewares
                 ControllerClass.prototype,
                 route.handlerName
               ) || [];
+
+            // --- INTERCEPTOR LOGIC START ---
+            // Get class-level interceptors
+            const classInterceptorsConstructors: Constructor<DiKitInterceptor>[] =
+              Reflect.getMetadata(INTERCEPTOR_METADATA, ControllerClass) || [];
+
+            // Get method-level interceptors
+            const methodInterceptorsConstructors: Constructor<DiKitInterceptor>[] =
+              Reflect.getMetadata(
+                INTERCEPTOR_METADATA,
+                ControllerClass.prototype,
+                route.handlerName
+              ) || [];
+
+            // Combine and resolve all interceptor instances
+            const allInterceptorConstructors = [
+              ...classInterceptorsConstructors,
+              ...methodInterceptorsConstructors,
+            ];
+
+            const interceptorInstances: DiKitInterceptor[] =
+              allInterceptorConstructors.map((I) => container.resolve(I));
+            // --- INTERCEPTOR LOGIC END ---
 
             const finalRouteHandler = async (ctx: Context) => {
               const parameters: ParameterDefinition[] =
@@ -172,9 +206,29 @@ export async function registerControllers(
                       "design:paramtypes",
                       ControllerClass.prototype,
                       route.handlerName
-                    )[param.index];
+                    )?.[param.index]; // Use optional chaining for safety
+
+                    if (!ParamType) {
+                      console.warn(
+                        `Missing design:paramtypes metadata for parameter ${
+                          param.index
+                        } of ${String(route.handlerName)} in ${
+                          ControllerClass.name
+                        }. Cannot validate body.`
+                      );
+                      args[param.index] = ctx.req.body; // Assign raw body if type is unknown
+                      break;
+                    }
 
                     const zodSchema = getZodSchemaForDto(ParamType);
+
+                    if (!zodSchema) {
+                      console.warn(
+                        `No Zod schema found for DTO type ${ParamType.name}. Assigning raw body.`
+                      );
+                      args[param.index] = ctx.req.body; // Assign raw body if no schema
+                      break;
+                    }
 
                     const parseResult = zodSchema.safeParse(ctx.req.body);
 
@@ -183,7 +237,7 @@ export async function registerControllers(
                         message: "Validation failed",
                         errors: parseResult.error.flatten().fieldErrors,
                       });
-                      return;
+                      return; // Stop execution if validation fails
                     }
 
                     args[param.index] = parseResult.data;
@@ -193,26 +247,63 @@ export async function registerControllers(
                 }
               }
 
+              // --- INTERCEPTOR CHAIN EXECUTION ---
+              const createCallHandler = (index: number): CallHandler => {
+                return {
+                  handle: async () => {
+                    if (index < interceptorInstances.length) {
+                      const currentInterceptor = interceptorInstances[index];
+                      const executionContext: ExecutionContext = {
+                        getType: () => "http", // Assuming HTTP context for now
+                        switchToHttp: () => ({
+                          getRequest: () => ctx.req,
+                          getResponse: () => ctx, // Pass BunServe's Context as the 'res'
+                        }),
+                        getHandler: () => originalControllerMethod,
+                        getClass: () => ControllerClass,
+                      };
+                      // Call the current interceptor's intercept method, passing the next handler
+                      return currentInterceptor.intercept(
+                        executionContext,
+                        createCallHandler(index + 1) // Recursively create the next CallHandler
+                      );
+                    } else {
+                      // If no more interceptors, execute the actual controller method
+                      return originalControllerMethod.apply(instance, args);
+                    }
+                  },
+                };
+              };
+
+              let resultFromInterceptors: any;
               try {
-                const result = await originalControllerMethod.apply(
-                  instance,
-                  args
-                );
+                // Start the interceptor chain with the first interceptor (or the handler if no interceptors)
+                resultFromInterceptors = await createCallHandler(0).handle();
+
+                // If the interceptor chain completes successfully, handle the response
                 if (hasReactMetadata) {
                   const handler = String(route.handlerName);
                   const jsFileName = `${ControllerClass.name}.${handler}.entry.js`;
 
-                  const props = ctx.body || result;
+                  // Use the result from the interceptor chain as props
+                  const props = ctx.body || resultFromInterceptors;
 
-                  const seoMeta = result.head;
+                  // Assume seoMeta comes from the result of the handler/interceptor chain
+                  const seoMeta = resultFromInterceptors?.head;
 
                   const html = generateDynamicHtml(jsFileName, props, seoMeta);
 
-                  ctx.setHeader("Content-Type", "text/html; charset=utf-8");
-                  ctx.send(html);
+                  if (!ctx.headersSent()) {
+                    ctx.setHeader("Content-Type", "text/html; charset=utf-8");
+                    ctx.send(html);
+                  }
                 } else {
-                  if (result !== undefined) {
-                    ctx.json(result);
+                  // If it's a JSON API, and no response has been sent yet, send the JSON result
+                  if (
+                    resultFromInterceptors !== undefined &&
+                    !ctx.headersSent()
+                  ) {
+                    ctx.json(resultFromInterceptors);
                   }
                 }
               } catch (error) {
@@ -223,15 +314,18 @@ export async function registerControllers(
                   error
                 );
                 if (error instanceof HttpException) {
-                  ctx.status(error.status).json(error.toJson());
+                  if (!ctx.headersSent()) {
+                    ctx.status(error.status).json(error.toJson());
+                  }
                 } else {
-                  if (!ctx.headersSent) {
+                  if (!ctx.headersSent()) {
                     ctx.status(500).json({ error: "Internal Server Error" });
                   }
                 }
               }
             };
 
+            // Retrieve guard constructors
             const classGuards: (new () => CanActivate)[] =
               Reflect.getMetadata("classGuards", ControllerClass) || [];
             const methodGuards: (new () => CanActivate)[] =
@@ -241,20 +335,32 @@ export async function registerControllers(
                 route.handlerName
               ) || [];
 
-            const guardMiddleware = async (req: any, res: any, next: any) => {
+            // Define the Express-style guard middleware function
+            const expressStyleGuardMiddleware = async (
+              req: any, // This is the ExpressReq shim
+              res: any, // This is the ExpressRes shim, which points to ctx
+              next: any // This is the Express-style next callback
+            ) => {
               try {
                 const guardClasses = [...classGuards, ...methodGuards];
                 const guardInstances: CanActivate[] = guardClasses.map(
                   (GuardClass) => container.resolve(GuardClass)
                 );
 
+                // evaluateGuards will receive the expressReq and expressRes shims
                 const passed = await evaluateGuards(guardInstances, req, res);
+
                 if (!passed) {
-                  return res
-                    .status(403)
-                    .json({ message: "Forbidden by guard." });
+                  // If guard fails, a response might already be set by canActivate.
+                  // If not, ensure one is sent here using the expressRes shim.
+                  if (!res.headersSent) {
+                    // Use headersSent from the expressRes shim
+                    res.status(403).json({ message: "Forbidden by guard." });
+                  }
+                  return; // Stop the middleware chain
                 }
 
+                // If guards pass, proceed to the next middleware/handler in the BunServe chain
                 next();
               } catch (err: any) {
                 console.error(
@@ -263,18 +369,30 @@ export async function registerControllers(
                   )}:`,
                   err.message || err
                 );
-                if (res?.status && res?.json) {
-                  return res.status(403).json({ ...err });
+
+                if (!res.headersSent) {
+                  if (err instanceof HttpException) {
+                    res.status(err.status).json(err.toJson());
+                  } else {
+                    res.status(500).json({ message: "Guard internal error." });
+                  }
                 }
-                next();
+                // No `next()` call here, as an error occurred and a response was sent.
               }
             };
 
-            app[route.method as keyof BunServe](
-              (prefix + route.path) as any,
-              guardMiddleware,
+            // --- IMPORTANT: Wrap the Express-style guard middleware for BunServe ---
+            const bunServeGuardMiddleware: Middleware = wrapExpressMiddleware(
+              expressStyleGuardMiddleware
+            );
 
-              finalRouteHandler.bind(instance)
+            // Register the route with BunServe
+            // The order is important: global -> method-specific BunServe middlewares -> wrapped guards -> final handler
+            app[route.method.toLowerCase() as keyof BunServe](
+              (prefix + route.path) as any,
+              ...methodMiddlewares, // Regular BunServe specific middlewares
+              bunServeGuardMiddleware, // The wrapped guard middleware
+              finalRouteHandler // Your final handler which now runs the interceptor chain
             );
 
             console.log(
@@ -285,6 +403,12 @@ export async function registerControllers(
               )} ${
                 hasReactMetadata
                   ? colorText.cyan("(Server rendered React View)")
+                  : ""
+              } ${
+                interceptorInstances.length > 0
+                  ? colorText.yellow(
+                      `(${interceptorInstances.length} Interceptors)`
+                    )
                   : ""
               }`
             );
@@ -306,8 +430,7 @@ export async function registerControllers(
     }
   }
 
-  //
-
+  // ---- WebSocket Gateway Registration ----
   const gatewayFiles = findGatewayFiles(controllersDir);
 
   if (gatewayFiles.length === 0) {
