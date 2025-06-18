@@ -1,14 +1,13 @@
 import { Property } from "@express-di-kit/common";
 import {
-  IsArray,
   IsEmail,
+  IsFile,
   IsNumber,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
 } from "@express-di-kit/validator";
-import { z } from "zod";
 
 export class UserDto {
   @Property()
@@ -30,7 +29,10 @@ export class UserDto {
   @MaxLength(6)
   address!: string;
 
-  @Property()
-  @IsArray(z.string(), { min: 1, max: 5 })
-  hobbies!: string[];
+  // @Property()
+  // @IsArray(z.string(), { min: 1, max: 5 })
+  // hobbies!: string[];
+
+  @IsFile({ mimeTypes: ["image/jpeg", "image/png"], maxSize: 5 * 1024 * 1024 }) // Max 5MB
+  picture!: File;
 }

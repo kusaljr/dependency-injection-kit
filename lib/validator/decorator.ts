@@ -21,7 +21,7 @@ function updateSchema(
 
 export function IsNumber() {
   return function (target: any, propertyKey: string) {
-    updateSchema(target, propertyKey, () => z.number());
+    updateSchema(target, propertyKey, () => z.coerce.number());
   };
 }
 
@@ -88,6 +88,41 @@ export function IsArray(
 export function IsObject(schema: ZodTypeAny) {
   return function (target: any, propertyKey: string) {
     updateSchema(target, propertyKey, () => schema);
+  };
+}
+
+export function IsFile(options?: IsFileOptions) {
+  return function (target: any, propertyKey: string) {
+    updateSchema(target, propertyKey, (existing) => {
+      let fileSchema: ZodTypeAny = z.instanceof(File, {
+        message: "Expected a file upload",
+      });
+
+      if (options?.mimeTypes) {
+        fileSchema = fileSchema.refine(
+          (file: File) => options.mimeTypes!.includes(file.type),
+          {
+            message: `Invalid file type. Allowed types: ${options.mimeTypes.join(
+              ", "
+            )}`,
+          }
+        );
+      }
+
+      if (options?.maxSize) {
+        fileSchema = fileSchema.refine(
+          (file: File) => file.size <= options.maxSize!,
+          {
+            message: `File size exceeds the limit of ${
+              options.maxSize / (1024 * 1024)
+            }MB`,
+          }
+        );
+      }
+
+      // Combine with existing schema (e.g., if IsOptional was also applied)
+      return fileSchema.and(existing);
+    });
   };
 }
 

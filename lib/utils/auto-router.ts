@@ -17,7 +17,10 @@ import {
   DiKitRequest,
   DiKitResponse,
 } from "@express-di-kit/bun-engine/types"; // Import DiKitRequest
-import { HttpException } from "@express-di-kit/common/exceptions";
+import {
+  BadRequestException,
+  HttpException,
+} from "@express-di-kit/common/exceptions";
 import { CanActivate, evaluateGuards } from "@express-di-kit/common/middleware";
 import {
   CallHandler,
@@ -26,8 +29,10 @@ import {
   INTERCEPTOR_METADATA,
 } from "@express-di-kit/global/interceptor";
 import { WebSocketServer } from "@express-di-kit/socket/web-socket";
+import { getSchema } from "@express-di-kit/validator/decorator";
 import * as fs from "fs";
 import * as path from "path";
+import { ZodError } from "zod";
 import { SOCKET_METADATA_KEY } from "../socket/decorator";
 import { REACT_METADATA } from "../static/decorator";
 import { getZodSchemaForDto } from "../validator/utils";
@@ -35,7 +40,50 @@ import { colorMethod, colorText } from "./colors";
 import { generateDynamicHtml } from "./static/generate-dynamic-html";
 import { generateReactView } from "./static/generate-react-view";
 
-// Helper to recursively find gateway files (*.gateway.ts or *.gateway.js)
+async function processBodyAndValidate(
+  ctx: Context,
+  targetClass: any
+): Promise<any> {
+  const incomingBody = ctx.req.body;
+
+  if (!(incomingBody instanceof FormData)) {
+    if (typeof incomingBody === "object" && incomingBody !== null) {
+      const zodSchema = getSchema(targetClass);
+      const parseResult = zodSchema.safeParse(incomingBody);
+
+      if (!parseResult.success) {
+        throw new ZodError(parseResult.error.issues);
+      }
+      return parseResult.data;
+    }
+
+    throw new BadRequestException("Unsupported body format for validation.");
+  }
+
+  const rawBodyForZod: Record<string, any> = {};
+  for (const [key, value] of incomingBody.entries()) {
+    if (key in rawBodyForZod) {
+      if (Array.isArray(rawBodyForZod[key])) {
+        rawBodyForZod[key].push(value);
+      } else {
+        rawBodyForZod[key] = [rawBodyForZod[key], value];
+      }
+    } else {
+      rawBodyForZod[key] = value;
+    }
+  }
+
+  const zodSchema = getSchema(targetClass);
+  const parseResult = zodSchema.safeParse(rawBodyForZod);
+
+  if (!parseResult.success) {
+    console.error("Zod validation failed:", parseResult.error.issues);
+    throw new ZodError(parseResult.error.issues);
+  }
+
+  return parseResult.data;
+}
+
 function findGatewayFiles(dir: string): string[] {
   let gatewayFiles: string[] = [];
   const files = fs.readdirSync(dir);
@@ -232,21 +280,27 @@ export async function registerControllers(
                       break;
                     }
 
-                    const parseResult = zodSchema.safeParse(ctx.req.body);
-
-                    if (!parseResult.success) {
-                      if (!ctx.res.headersSent()) {
-                        // Use ctx.res
-                        ctx.res.status(422).json({
+                    try {
+                      const newParsedResult = await processBodyAndValidate(
+                        ctx,
+                        ParamType
+                      );
+                      args[param.index] = newParsedResult;
+                    } catch (error) {
+                      if (error instanceof ZodError) {
+                        if (!ctx.res.headersSent()) {
                           // Use ctx.res
-                          message: "Validation failed",
-                          errors: parseResult.error.flatten().fieldErrors,
-                        });
+                          ctx.res.status(422).json({
+                            message: "Validation failed",
+                            errors: error.issues,
+                          });
+                        }
+                        return;
+                      } else {
+                        throw error;
                       }
-                      return; // Stop execution if validation fails
                     }
 
-                    args[param.index] = parseResult.data;
                     break;
                   default:
                     break;
