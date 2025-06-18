@@ -1,11 +1,12 @@
+import { DiKitRequest, DiKitResponse } from "@express-di-kit/bun-engine/types";
 import "reflect-metadata";
 import { Constructor } from "./container";
 
 export interface ExecutionContext {
   getType(): "http" | "ws" | "rpc";
   switchToHttp(): {
-    getRequest(): any;
-    getResponse(): any;
+    getRequest(): DiKitRequest;
+    getResponse(): DiKitResponse;
   };
   getHandler(): Function;
   getClass<T = any>(): Constructor<T>;

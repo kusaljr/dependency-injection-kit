@@ -1,4 +1,5 @@
-import { BunServe, Context } from "@express-di-kit/bun-engine";
+import { BunServe } from "@express-di-kit/bun-engine";
+import { Context } from "@express-di-kit/bun-engine/types";
 import * as fs from "fs";
 import { generateHTML, generateSwaggerInitJs, getSwaggerAssetMap } from ".";
 import { SwaggerUiOptions } from "./types";

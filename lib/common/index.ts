@@ -12,7 +12,7 @@ export {
   Res,
 } from "../decorators/router";
 
-export { RateLimitGuard } from "../ops/rate-limit/rate-limit";
+export { RateLimitInterceptor } from "../ops/rate-limit";
 
 export { Injectable } from "../decorators/injectable";
 

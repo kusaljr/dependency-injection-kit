@@ -6,12 +6,11 @@ import {
   Patch,
   Post,
   Put,
-  RateLimitGuard,
   Req,
 } from "@express-di-kit/common";
 
-import { UseGuards } from "@express-di-kit/common/middleware";
 import { UseInterceptors } from "@express-di-kit/global/interceptor";
+import { RateLimitInterceptor } from "@express-di-kit/ops/rate-limit";
 import { React } from "@express-di-kit/static";
 import { pageResponse } from "@express-di-kit/static/decorator";
 import { UserDto } from "./user.dto";
@@ -19,7 +18,7 @@ import { LoggingInterceptor } from "./user.interceptors";
 import { UserService } from "./user.service";
 
 @Controller("/user")
-@UseGuards(RateLimitGuard)
+@UseInterceptors(RateLimitInterceptor)
 export class UserController {
   constructor(private readonly userService: UserService) {}
 

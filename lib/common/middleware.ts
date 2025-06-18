@@ -1,5 +1,10 @@
+import { DiKitRequest, DiKitResponse } from "@express-di-kit/bun-engine/types";
+
 export interface CanActivate {
-  canActivate(req: Request, res: Response): boolean | Promise<boolean>;
+  canActivate(
+    req: DiKitRequest,
+    res: DiKitResponse
+  ): boolean | Promise<boolean>;
 }
 
 export function UseGuards(
