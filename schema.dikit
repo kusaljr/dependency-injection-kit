@@ -1,0 +1,10 @@
+model user {
+  id int
+  name string
+}
+
+
+model product {
+  id int
+  name string
+}
