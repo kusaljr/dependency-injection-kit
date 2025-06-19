@@ -1,4 +1,11 @@
-import { FieldNode, ModelNode, RelationEnum, SchemaNode } from "./ast";
+import {
+  FieldNode,
+  JsonFieldNode,
+  JsonTypeDefinitionNode,
+  ModelNode,
+  RelationEnum,
+  SchemaNode,
+} from "./ast";
 import { Token, TokenType } from "./lexer";
 
 export class SyntaxError extends Error {
@@ -10,15 +17,18 @@ export class SyntaxError extends Error {
 
 export class Parser {
   private tokens: Token[];
-  private currentTokenIndex: number = 0;
+  private currentTokenIndex = 0;
   private errors: SyntaxError[] = [];
 
   constructor(tokens: Token[]) {
     this.tokens = tokens;
   }
 
-  private peek(offset: number = 0): Token {
-    return this.tokens[this.currentTokenIndex + offset];
+  private peek(offset = 0): Token {
+    return (
+      this.tokens[this.currentTokenIndex + offset] ??
+      this.tokens[this.tokens.length - 1]
+    );
   }
 
   private advance(): Token {
@@ -29,29 +39,26 @@ export class Parser {
   }
 
   private consume(expectedType: TokenType, errorMessage: string): Token {
-    const currentToken = this.peek();
-    if (currentToken.type === expectedType) {
+    const token = this.peek();
+    if (token.type === expectedType) {
       return this.advance();
-    } else {
-      const error = new SyntaxError(
-        errorMessage,
-        currentToken.line,
-        currentToken.column
-      );
-      this.errors.push(error);
-      throw error;
     }
+    const err = new SyntaxError(errorMessage, token.line, token.column);
+    this.errors.push(err);
+    throw err;
   }
 
   public parse(): { ast: SchemaNode | null; errors: SyntaxError[] } {
     try {
       const models: ModelNode[] = [];
+
       while (this.peek().type !== TokenType.EOF) {
-        const initialTokenIndex = this.currentTokenIndex;
+        const initialIndex = this.currentTokenIndex;
         try {
           models.push(this.parseModelDefinition());
-        } catch (e: any) {
+        } catch (e) {
           if (e instanceof SyntaxError) {
+            // error recovery: skip until next model or EOF
             while (
               this.peek().type !== TokenType.MODEL_KEYWORD &&
               this.peek().type !== TokenType.EOF
@@ -62,31 +69,32 @@ export class Parser {
             throw e;
           }
         }
-        if (this.currentTokenIndex === initialTokenIndex) {
-          const unexpectedToken = this.peek();
+
+        if (this.currentTokenIndex === initialIndex) {
+          const tok = this.peek();
           this.errors.push(
             new SyntaxError(
-              `Unexpected token '${unexpectedToken.value}' of type ${unexpectedToken.type}`,
-              unexpectedToken.line,
-              unexpectedToken.column
+              `Unexpected token '${tok.value}'`,
+              tok.line,
+              tok.column
             )
           );
           this.advance();
         }
       }
-      const schemaNode: SchemaNode = {
-        kind: "Schema",
-        models: models,
-        line: 1,
-        column: 1,
+
+      return {
+        ast: {
+          kind: "Schema",
+          models,
+          line: 1,
+          column: 1,
+        },
+        errors: this.errors,
       };
-      return { ast: schemaNode, errors: this.errors };
     } catch (e: any) {
       if (!(e instanceof SyntaxError)) {
-        console.error(
-          "An unexpected internal error occurred during parsing:",
-          e
-        );
+        console.error("Unexpected parser error:", e);
         this.errors.push(
           new SyntaxError(
             `Internal error: ${e.message}`,
@@ -100,15 +108,12 @@ export class Parser {
   }
 
   private parseModelDefinition(): ModelNode {
-    const modelKeywordToken = this.consume(
+    const modelToken = this.consume(
       TokenType.MODEL_KEYWORD,
-      "Expected 'model' keyword."
+      "Expected 'model' keyword"
     );
-    const nameToken = this.consume(
-      TokenType.IDENTIFIER,
-      "Expected model name (identifier)."
-    );
-    this.consume(TokenType.LCURLY, "Expected '{' after model name.");
+    const nameToken = this.consume(TokenType.IDENTIFIER, "Expected model name");
+    this.consume(TokenType.LCURLY, "Expected '{' after model name");
 
     const fields: FieldNode[] = [];
     const combinedUniques: string[][] = [];
@@ -131,15 +136,14 @@ export class Parser {
               blockToken.column
             )
           );
-          this.advance();
         }
       } else {
-        const unexpectedToken = this.peek();
+        const tok = this.peek();
         this.errors.push(
           new SyntaxError(
-            `Unexpected token '${unexpectedToken.value}' inside model '${nameToken.value}'. Expected field definition, composite block, or '}'.`,
-            unexpectedToken.line,
-            unexpectedToken.column
+            `Unexpected token '${tok.value}' inside model`,
+            tok.line,
+            tok.column
           )
         );
         this.advance();
@@ -148,16 +152,16 @@ export class Parser {
 
     this.consume(
       TokenType.RCURLY,
-      `Expected '}' to close model '${nameToken.value}'.`
+      `Expected '}' to close model '${nameToken.value}'`
     );
 
     return {
       kind: "Model",
       name: nameToken.value,
-      fields: fields,
-      combinedUniques: combinedUniques,
-      line: modelKeywordToken.line,
-      column: modelKeywordToken.column,
+      fields,
+      combinedUniques,
+      line: modelToken.line,
+      column: modelToken.column,
     };
   }
 
@@ -166,171 +170,132 @@ export class Parser {
     this.consume(TokenType.LBRACKET, "Expected '[' after @@unique(");
 
     const fields: string[] = [];
-
     while (this.peek().type !== TokenType.RBRACKET) {
-      const idToken = this.consume(
+      const tok = this.consume(
         TokenType.IDENTIFIER,
         "Expected field name in @@unique"
       );
-      fields.push(idToken.value);
+      fields.push(tok.value);
 
       if (this.peek().type === TokenType.COMMA) {
         this.advance();
       } else if (this.peek().type !== TokenType.RBRACKET) {
         throw new SyntaxError(
-          "Expected ',' or ']' in @@unique field list",
+          "Expected ',' or ']' in @@unique",
           this.peek().line,
           this.peek().column
         );
       }
     }
 
-    this.consume(
-      TokenType.RBRACKET,
-      "Expected ']' to close @@unique field list"
-    );
-    this.consume(TokenType.RPAREN, "Expected ')' after @@unique field list");
-
+    this.consume(TokenType.RBRACKET, "Expected ']' in @@unique");
+    this.consume(TokenType.RPAREN, "Expected ')' after @@unique");
     return fields;
   }
 
   private parseFieldDefinition(): FieldNode {
-    const nameToken = this.consume(
-      TokenType.IDENTIFIER,
-      "Expected field name (identifier)."
-    );
+    const nameToken = this.consume(TokenType.IDENTIFIER, "Expected field name");
 
-    let fieldTypeStr = "";
+    let fieldType = "";
+    let jsonTypeDefinition: JsonTypeDefinitionNode | undefined;
     let isArray = false;
 
-    if (this.peek().type === TokenType.INT_TYPE) {
-      fieldTypeStr = "int";
+    const typeToken = this.peek();
+    if (
+      typeToken.type === TokenType.INT_TYPE ||
+      typeToken.type === TokenType.STRING_TYPE ||
+      typeToken.type === TokenType.FLOAT_TYPE ||
+      typeToken.type === TokenType.BOOLEAN_TYPE
+    ) {
+      fieldType = typeToken.value;
       this.advance();
-    } else if (this.peek().type === TokenType.STRING_TYPE) {
-      fieldTypeStr = "string";
+    } else if (typeToken.type === TokenType.JSON_TYPE) {
+      fieldType = "json";
       this.advance();
-    } else if (this.peek().type === TokenType.FLOAT_TYPE) {
-      fieldTypeStr = "float";
-      this.advance();
-    } else if (this.peek().type === TokenType.IDENTIFIER) {
-      fieldTypeStr = this.advance().value;
 
-      if (this.peek().value === "[" && this.peek(1)?.value === "]") {
-        this.advance(); // [
-        this.advance(); // ]
-        isArray = true;
+      if (this.peek().type === TokenType.LPAREN) {
+        this.advance();
+        jsonTypeDefinition = this.parseJsonTypeDefinition();
+        this.consume(
+          TokenType.RPAREN,
+          "Expected ')' after json type definition"
+        );
       }
+    } else if (typeToken.type === TokenType.IDENTIFIER) {
+      fieldType = typeToken.value;
+      this.advance();
     } else {
-      const token = this.peek();
       throw new SyntaxError(
-        `Expected field type ('int', 'string', or model name) after field '${nameToken.value}', but found '${token.value}' (${token.type}).`,
-        token.line,
-        token.column
+        `Unexpected type '${typeToken.value}'`,
+        typeToken.line,
+        typeToken.column
       );
     }
 
-    let relation: FieldNode["relation"] | undefined = undefined;
+    if (
+      this.peek().type === TokenType.LBRACKET &&
+      this.peek(1).type === TokenType.RBRACKET
+    ) {
+      this.advance();
+      this.advance();
+      isArray = true;
+    }
+
+    let relation: FieldNode["relation"];
     let isPrimaryKey = false;
     let isRequired = false;
     let isUnique = false;
-    let defaultValue: string | number | boolean | object | undefined =
-      undefined;
+    let defaultValue: any;
 
     while (this.peek().type === TokenType.AT) {
-      this.advance(); // consume @
-      const decoratorToken = this.consume(
+      this.advance();
+      const decoName = this.consume(
         TokenType.IDENTIFIER,
-        "Expected decorator name after '@'."
-      );
+        "Expected decorator name"
+      ).value;
 
-      const decoratorName = decoratorToken.value;
-
-      if (
-        decoratorName === "one_to_many" ||
-        decoratorName === "many_to_one" ||
-        decoratorName === "one_to_one"
-      ) {
-        let foreignKey: string | undefined = undefined;
-
+      if (["one_to_many", "many_to_one", "one_to_one"].includes(decoName)) {
+        let foreignKey: string | undefined;
         if (this.peek().type === TokenType.LPAREN) {
-          this.advance(); // (
-          const fkToken = this.consume(
+          this.advance();
+          foreignKey = this.consume(
             TokenType.IDENTIFIER,
-            "Expected foreign key field inside relation decorator."
-          );
-          foreignKey = fkToken.value;
-          this.consume(
-            TokenType.RPAREN,
-            "Expected ')' to close relation decorator arguments."
-          );
+            "Expected foreign key"
+          ).value;
+          this.consume(TokenType.RPAREN, "Expected ')' after foreign key");
         }
-
-        relation = {
-          type: decoratorName as RelationEnum,
-          foreignKey,
-        };
-      } else if (decoratorName === "primary_key") {
+        relation = { type: decoName as RelationEnum, foreignKey };
+      } else if (decoName === "primary_key") {
         isPrimaryKey = true;
-      } else if (decoratorName === "unique") {
+      } else if (decoName === "unique") {
         isUnique = true;
-      } else if (decoratorName === "required") {
-        // 'required' is a synonym for 'not null'
-        if (defaultValue !== undefined) {
-          throw new SyntaxError(
-            `Field '${nameToken.value}' cannot have both @default and @required decorators.`,
-            decoratorToken.line,
-            decoratorToken.column
-          );
-        }
+      } else if (decoName === "required") {
         isRequired = true;
-      } else if (decoratorName === "default") {
-        this.consume(TokenType.LPAREN, "Expected '(' after '@default'.");
-
-        const valueToken = this.advance();
-        let rawValue: string = valueToken.value;
-
-        // Parse as number, boolean, string, or JSON object
-        if (valueToken.type === TokenType.NUMBER_LITERAL) {
-          defaultValue = Number(rawValue);
-        } else if (valueToken.type === TokenType.STRING_LITERAL) {
-          defaultValue = rawValue;
+      } else if (decoName === "default") {
+        this.consume(TokenType.LPAREN, "Expected '(' after @default");
+        const valTok = this.advance();
+        if (valTok.type === TokenType.NUMBER_LITERAL) {
+          defaultValue = Number(valTok.value);
+        } else if (valTok.type === TokenType.STRING_LITERAL) {
+          defaultValue = valTok.value;
         } else if (
-          valueToken.type === TokenType.IDENTIFIER &&
-          (rawValue === "true" || rawValue === "false")
+          valTok.type === TokenType.IDENTIFIER &&
+          ["true", "false"].includes(valTok.value)
         ) {
-          defaultValue = rawValue === "true";
-        } else if (valueToken.type === TokenType.LCURLY) {
-          let objStr = "{";
-          let braceCount = 1;
-          while (braceCount > 0) {
-            const tok = this.advance();
-            objStr += tok.value;
-            if (tok.type === TokenType.LCURLY) braceCount++;
-            if (tok.type === TokenType.RCURLY) braceCount--;
-          }
-          try {
-            defaultValue = JSON.parse(objStr);
-          } catch {
-            throw new SyntaxError(
-              `Invalid JSON object in @default: ${objStr}`,
-              valueToken.line,
-              valueToken.column
-            );
-          }
+          defaultValue = valTok.value === "true";
         } else {
           throw new SyntaxError(
-            `Unsupported default value: '${rawValue}'`,
-            valueToken.line,
-            valueToken.column
+            `Invalid default value '${valTok.value}'`,
+            valTok.line,
+            valTok.column
           );
         }
-
-        this.consume(TokenType.RPAREN, "Expected ')' after @default value.");
+        this.consume(TokenType.RPAREN, "Expected ')' after @default value");
       } else {
         throw new SyntaxError(
-          `Unknown decorator '${decoratorName}'`,
-          decoratorToken.line,
-          decoratorToken.column
+          `Unknown decorator '@${decoName}'`,
+          this.peek(-1).line,
+          this.peek(-1).column
         );
       }
     }
@@ -338,8 +303,9 @@ export class Parser {
     return {
       kind: "Field",
       name: nameToken.value,
-      fieldType: fieldTypeStr,
+      fieldType,
       isArray,
+      jsonTypeDefinition,
       relation,
       isPrimaryKey,
       isRequired,
@@ -347,6 +313,59 @@ export class Parser {
       defaultValue,
       line: nameToken.line,
       column: nameToken.column,
+    };
+  }
+
+  private parseJsonTypeDefinition(): JsonTypeDefinitionNode {
+    this.consume(TokenType.LCURLY, "Expected '{' in json type definition");
+    const fields: JsonFieldNode[] = [];
+
+    while (this.peek().type !== TokenType.RCURLY) {
+      const nameTok = this.consume(
+        TokenType.IDENTIFIER,
+        "Expected JSON field name"
+      );
+      const typeTok = this.advance();
+
+      if (
+        typeTok.type !== TokenType.INT_TYPE &&
+        typeTok.type !== TokenType.STRING_TYPE &&
+        typeTok.type !== TokenType.FLOAT_TYPE &&
+        typeTok.type !== TokenType.BOOLEAN_TYPE &&
+        typeTok.type !== TokenType.IDENTIFIER
+      ) {
+        throw new SyntaxError(
+          `Invalid JSON field type '${typeTok.value}'`,
+          typeTok.line,
+          typeTok.column
+        );
+      }
+
+      fields.push({
+        kind: "JsonField",
+        name: nameTok.value,
+        fieldType: typeTok.value,
+        line: nameTok.line,
+        column: nameTok.column,
+      });
+
+      if (this.peek().type === TokenType.COMMA) {
+        this.advance();
+      } else if (this.peek().type !== TokenType.RCURLY) {
+        throw new SyntaxError(
+          "Expected ',' or '}' in json type definition",
+          this.peek().line,
+          this.peek().column
+        );
+      }
+    }
+
+    this.consume(TokenType.RCURLY, "Expected '}' in json type definition");
+    return {
+      kind: "JsonTypeDefinition",
+      fields,
+      line: fields[0]?.line ?? 0,
+      column: fields[0]?.column ?? 0,
     };
   }
 }

@@ -12,6 +12,7 @@ const schemaFilePath = "schema.dikit";
 console.log(`Processing schema from: ${schemaFilePath}\n`);
 
 const tokens: Token[] = Lexer.fromFile(schemaFilePath);
+console.log(tokens);
 
 if (tokens.length === 0) {
   console.error("No tokens generated. Cannot parse or analyze.");
@@ -49,7 +50,7 @@ if (semanticErrors.length > 0) {
 
 console.log("\n--- Schema Successfully Validated! ---");
 console.log("AST (Simplified View):");
-// console.log(JSON.stringify(ast, null, 2));
+console.log(JSON.stringify(ast, null, 2));
 
 ast.models.forEach((model) => {
   console.log(`  Model: ${model.name}`);
@@ -82,9 +83,12 @@ console.log(`✅ Type definitions written to ${outPath}`);
 
 const db = new DB(ast);
 
-const query = db.table("product").insert({
-  name: "Sample Product",
-  price: 19.99,
-});
+const query = db
+  .table("user")
+  .innerJoin("product", "product.user_id = user.id")
+  .select(["user.id", "user.name", "product.name", "product.price"])
+  .limit(10)
+  .offset(0)
+  .build();
 
 console.log(query);

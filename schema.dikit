@@ -17,4 +17,5 @@ model product {
 model barcode {
   id int @primary_key
   code string
+
 }

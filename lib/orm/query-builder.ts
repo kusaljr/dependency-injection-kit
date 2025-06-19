@@ -56,7 +56,6 @@ interface JoinClause<M extends Models> {
   on: string;
 }
 
-// Assuming a generic return type for methods that build prepared statements
 interface PreparedStatement {
   sql: string;
   params: any[];
