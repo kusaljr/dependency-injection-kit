@@ -1,7 +1,9 @@
 import { SchemaNode } from "./ast";
 import { Models } from "./schema-types";
 
-// ---------- UTILITY TYPES ----------
+type InsertValues<M extends Models, T extends keyof M> = Partial<M[T]>;
+type UpdateValues<M extends Models, T extends keyof M> = Partial<M[T]>;
+
 type ForeignKeyOf<
   M extends Models,
   Source extends keyof M,
@@ -54,7 +56,6 @@ interface JoinClause<M extends Models> {
   on: string;
 }
 
-// ---------- QUERY CLASS ----------
 class Query<
   M extends Models,
   T extends keyof M,
@@ -67,6 +68,8 @@ class Query<
   private limitValue: number | null;
   private offsetValue: number | null;
   private joinedTables: JT[];
+  private updateValues: UpdateValues<M, T> | null = null;
+  private isDeleteOperation: boolean = false;
 
   constructor(
     private tableName: T,
@@ -75,7 +78,9 @@ class Query<
     joins: JoinClause<M>[] = [],
     limit: number | null = null,
     offset: number | null = null,
-    joinedTables: JT[] = [tableName as unknown as JT]
+    joinedTables: JT[] = [tableName as unknown as JT],
+    updateValues: UpdateValues<M, T> | null = null,
+    isDeleteOperation: boolean = false
   ) {
     this.selectedFields = fields;
     this.conditions = conditions;
@@ -83,11 +88,16 @@ class Query<
     this.limitValue = limit;
     this.offsetValue = offset;
     this.joinedTables = joinedTables;
+    this.updateValues = updateValues;
+    this.isDeleteOperation = isDeleteOperation;
   }
 
   public select<N extends SelectFieldFrom<M, JT>>(
     fields: N[]
   ): Query<M, T, N, JT> {
+    if (this.updateValues || this.isDeleteOperation) {
+      throw new Error("SELECT cannot be used after update() or delete().");
+    }
     return new Query(
       this.tableName,
       fields,
@@ -107,11 +117,16 @@ class Query<
       this.joins,
       this.limitValue,
       this.offsetValue,
-      this.joinedTables
+      this.joinedTables,
+      this.updateValues,
+      this.isDeleteOperation
     );
   }
 
   public limit(n: number): Query<M, T, F, JT> {
+    if (this.updateValues || this.isDeleteOperation) {
+      throw new Error("LIMIT cannot be used with update() or delete().");
+    }
     return new Query(
       this.tableName,
       this.selectedFields,
@@ -124,6 +139,9 @@ class Query<
   }
 
   public offset(n: number): Query<M, T, F, JT> {
+    if (this.updateValues || this.isDeleteOperation) {
+      throw new Error("OFFSET cannot be used with update() or delete().");
+    }
     return new Query(
       this.tableName,
       this.selectedFields,
@@ -139,6 +157,9 @@ class Query<
     target: J,
     on: StrictJoinOn<M, JT, J>
   ): Query<M, T, F, JT | J> {
+    if (this.updateValues || this.isDeleteOperation) {
+      throw new Error("JOIN cannot be used with update() or delete().");
+    }
     return this.addJoin("inner", target, on);
   }
 
@@ -146,6 +167,9 @@ class Query<
     target: J,
     on: StrictJoinOn<M, JT, J>
   ): Query<M, T, F, JT | J> {
+    if (this.updateValues || this.isDeleteOperation) {
+      throw new Error("JOIN cannot be used with update() or delete().");
+    }
     return this.addJoin("left", target, on);
   }
 
@@ -153,6 +177,9 @@ class Query<
     target: J,
     on: StrictJoinOn<M, JT, J>
   ): Query<M, T, F, JT | J> {
+    if (this.updateValues || this.isDeleteOperation) {
+      throw new Error("JOIN cannot be used with update() or delete().");
+    }
     return this.addJoin("right", target, on);
   }
 
@@ -174,7 +201,60 @@ class Query<
     );
   }
 
+  public _update(values: UpdateValues<M, T>): string {
+    const setClauses = Object.entries(values)
+      .map(([field, value]) => `${String(field)} = ${JSON.stringify(value)}`)
+      .join(", ");
+
+    if (!setClauses) {
+      throw new Error("No values provided for update.");
+    }
+
+    let query = `UPDATE ${String(this.tableName)} SET ${setClauses}`;
+
+    const whereClauses = Object.entries(this.conditions)
+      .map(([field, value]) => `${String(field)} = ${JSON.stringify(value)}`)
+      .join(" AND ");
+
+    if (whereClauses) {
+      query += ` WHERE ${whereClauses}`;
+    } else {
+      console.warn(
+        `WARNING: UPDATE statement for table '${String(
+          this.tableName
+        )}' has no WHERE clause. All rows will be updated.`
+      );
+    }
+    return query;
+  }
+
+  public _delete(): string {
+    let query = `DELETE FROM ${String(this.tableName)}`;
+
+    const whereClauses = Object.entries(this.conditions)
+      .map(([field, value]) => `${String(field)} = ${JSON.stringify(value)}`)
+      .join(" AND ");
+
+    if (whereClauses) {
+      query += ` WHERE ${whereClauses}`;
+    } else {
+      console.warn(
+        `WARNING: DELETE statement for table '${String(
+          this.tableName
+        )}' has no WHERE clause. All rows will be deleted.`
+      );
+    }
+    return query;
+  }
+
   public build(): string {
+    if (this.updateValues) {
+      return this._update(this.updateValues);
+    }
+    if (this.isDeleteOperation) {
+      return this._delete();
+    }
+
     const fieldsStr =
       this.selectedFields.length > 0 ? this.selectedFields.join(", ") : "*";
 
@@ -206,7 +286,6 @@ class Query<
   }
 }
 
-// ---------- TABLE CLASS ----------
 class Table<M extends Models, T extends keyof M> {
   constructor(private tableName: T) {}
 
@@ -266,9 +345,51 @@ class Table<M extends Models, T extends keyof M> {
       [this.tableName, target]
     );
   }
+
+  public insert(values: InsertValues<M, T>): string {
+    const fields = Object.keys(values);
+    const valuesList = Object.values(values).map((v) => JSON.stringify(v)); // Convert values to JSON strings for SQL
+
+    if (fields.length === 0) {
+      throw new Error("No values provided for insertion.");
+    }
+
+    return `INSERT INTO ${String(this.tableName)} (${fields.join(
+      ", "
+    )}) VALUES (${valuesList.join(", ")})`;
+  }
+
+  public update(
+    values: UpdateValues<M, T>
+  ): Query<M, T, SelectFieldFrom<M, T>, T> {
+    return new Query(
+      this.tableName,
+      [],
+      {},
+      [],
+      null,
+      null,
+      [this.tableName as unknown as T],
+      values,
+      false
+    );
+  }
+
+  public delete(): Query<M, T, SelectFieldFrom<M, T>, T> {
+    return new Query(
+      this.tableName,
+      [],
+      {},
+      [],
+      null,
+      null,
+      [this.tableName as unknown as T],
+      null,
+      true
+    );
+  }
 }
 
-// ---------- DB CLASS ----------
 export class DB<M extends Models> {
   constructor(private ast: SchemaNode) {}
 

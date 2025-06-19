@@ -82,6 +82,6 @@ console.log(`✅ Type definitions written to ${outPath}`);
 
 const db = new DB(ast);
 
-const query = db.table("barcode").select(["barcode.code", "barcode.id"]);
+const query = db.table("product").delete().where({ id: 1 }).build();
 
 console.log(query);
