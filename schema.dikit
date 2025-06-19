@@ -1,17 +1,20 @@
 model user {
-  id int
-  name string
+  id int @primary_key
+  name string @unique
   products product[] @one_to_many
 }
 
 model product {
-  id int
-  name string
+  id int @primary_key
+  name string @required
+  price float @default(0.0)
   user_id int
   user user @many_to_one(user_id)
+
+  @@unique([name, user_id]) 
 }
 
 model barcode {
-  id int
+  id int @primary_key
   code string
 }

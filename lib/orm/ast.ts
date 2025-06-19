@@ -12,6 +12,7 @@ export interface ModelNode extends AstNode {
   kind: "Model";
   name: string;
   fields: FieldNode[];
+  combinedUniques?: string[][];
 }
 
 export enum RelationEnum {
@@ -29,4 +30,9 @@ export interface FieldNode extends AstNode {
     type: RelationEnum;
     foreignKey?: string;
   };
+  isPrimaryKey?: boolean;
+  isUnique?: boolean;
+  isNullable?: boolean;
+  isRequired?: boolean;
+  defaultValue?: string | number | boolean | object;
 }

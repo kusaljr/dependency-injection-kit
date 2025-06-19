@@ -9,6 +9,7 @@ export type user = {
 export type product = {
   id: number;
   name: string;
+  price: float;
   user_id: number;
   user: user;
 };

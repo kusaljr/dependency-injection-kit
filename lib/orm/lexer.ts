@@ -4,7 +4,7 @@ export enum TokenType {
   MODEL_KEYWORD = "MODEL_KEYWORD",
   INT_TYPE = "INT_TYPE",
   STRING_TYPE = "STRING_TYPE",
-
+  FLOAT_TYPE = "FLOAT_TYPE",
   LCURLY = "LCURLY", // {
   RCURLY = "RCURLY", // }
 
@@ -15,11 +15,15 @@ export enum TokenType {
   UNKNOWN = "UNKNOWN",
 
   AT = "AT", // @
+  COMPOSITE_BLOCK = "COMPOSITE_BLOCK", // @@unique @@index
   LPAREN = "LPAREN", // (
   RPAREN = "RPAREN", // )
   COMMA = "COMMA", // ,
   LBRACKET = "LBRACKET", // [
   RBRACKET = "RBRACKET", // ]
+
+  STRING_LITERAL = "STRING_LITERAL", // "abc", 'abc'
+  NUMBER_LITERAL = "NUMBER_LITERAL", // 123, 4.56
 }
 
 export interface Token {
@@ -90,9 +94,6 @@ export class Lexer {
       case "}":
         this.advance();
         return this.createToken(TokenType.RCURLY, "}");
-      case "@":
-        this.advance();
-        return this.createToken(TokenType.AT, "@");
       case "(":
         this.advance();
         return this.createToken(TokenType.LPAREN, "(");
@@ -110,6 +111,30 @@ export class Lexer {
         return this.createToken(TokenType.RBRACKET, "]");
     }
 
+    if (char === "@" && this.peek(1) === "@") {
+      this.advance();
+      this.advance();
+
+      let value = "";
+      while (this.peek() && /[a-zA-Z_]/.test(this.peek()!)) {
+        value += this.advance();
+      }
+
+      if (value === "unique" || value === "index" || value === "id") {
+        return this.createToken(TokenType.COMPOSITE_BLOCK, `@@${value}`);
+      } else {
+        console.warn(
+          `Lexing Error: Unknown composite directive '@@${value}' at line ${this.lineNumber}, column ${this.columnNumber}`
+        );
+        return this.createToken(TokenType.UNKNOWN, `@@${value}`);
+      }
+    }
+
+    if (char === "@") {
+      this.advance();
+      return this.createToken(TokenType.AT, "@");
+    }
+
     if (/[a-zA-Z_]/.test(char!)) {
       let value = "";
       while (this.peek() && /[a-zA-Z_0-9]/.test(this.peek()!)) {
@@ -123,9 +148,38 @@ export class Lexer {
           return this.createToken(TokenType.INT_TYPE, value);
         case "string":
           return this.createToken(TokenType.STRING_TYPE, value);
+        case "float":
+          return this.createToken(TokenType.FLOAT_TYPE, value);
         default:
           return this.createToken(TokenType.IDENTIFIER, value);
       }
+    }
+
+    if (/[0-9]/.test(char!)) {
+      let value = "";
+      let hasDot = false;
+
+      while (this.peek() && /[0-9]/.test(this.peek()!)) {
+        value += this.advance();
+      }
+
+      if (this.peek() === ".") {
+        hasDot = true;
+        value += this.advance(); // consume '.'
+
+        if (!/[0-9]/.test(this.peek()!)) {
+          console.warn(
+            `Lexing Error: Expected digit after '.' in number at line ${this.lineNumber}, column ${this.columnNumber}`
+          );
+          return this.createToken(TokenType.UNKNOWN, value);
+        }
+
+        while (this.peek() && /[0-9]/.test(this.peek()!)) {
+          value += this.advance();
+        }
+      }
+
+      return this.createToken(TokenType.NUMBER_LITERAL, value);
     }
 
     const unknownChar = this.advance();

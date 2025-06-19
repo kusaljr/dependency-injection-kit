@@ -15,6 +15,12 @@ const TYPE_MAPPINGS: Record<string, Record<DbDialect, string>> = {
     sqlite: "TEXT",
     generic: "VARCHAR(255)",
   },
+  float: {
+    postgresql: "REAL",
+    mysql: "FLOAT",
+    sqlite: "REAL",
+    generic: "FLOAT",
+  },
 };
 
 export class SqlGenerator {
@@ -37,13 +43,12 @@ export class SqlGenerator {
   private generateCreateTable(model: ModelNode): string {
     const tableName = model.name;
     const columns: string[] = [];
-    const foreignKeys: string[] = [];
+    const constraints: string[] = [];
 
     model.fields.forEach((field) => {
       const columnName = field.name;
 
-      // Only generate columns for scalar fields (or FK fields)
-      if (field.fieldType === "int" || field.fieldType === "string") {
+      if (["int", "string", "float"].includes(field.fieldType)) {
         const sqlType = this.mapFieldTypeToSql(field.fieldType);
 
         if (!sqlType) {
@@ -55,25 +60,46 @@ export class SqlGenerator {
 
         let columnDefinition = `${columnName} ${sqlType}`;
 
-        if (field.name === "id" && field.fieldType === "int") {
+        if (field.isPrimaryKey) {
           columnDefinition += " PRIMARY KEY";
         }
 
-        columnDefinition += " NOT NULL";
+        if (field.isUnique) {
+          columnDefinition += " UNIQUE";
+        }
+
+        if (field.defaultValue !== undefined) {
+          const defVal =
+            typeof field.defaultValue === "string"
+              ? `'${field.defaultValue}'`
+              : field.defaultValue;
+          columnDefinition += ` DEFAULT ${defVal}`;
+        }
+
+        if (field.isPrimaryKey || field.isRequired) {
+          columnDefinition += " NOT NULL";
+        }
+
         columns.push(columnDefinition);
       }
 
-      // Generate FK constraint if this field has a relation of type many_to_one or one_to_one
       if (field.relation && field.relation.foreignKey) {
         const fkField = field.relation.foreignKey;
         const referencedTable = field.fieldType;
-        const referencedColumn = "id"; // convention: reference 'id'
+        const referencedColumn = "id";
 
-        foreignKeys.push(
+        constraints.push(
           `FOREIGN KEY (${fkField}) REFERENCES ${referencedTable} (${referencedColumn})`
         );
       }
     });
+
+    // Add combined unique constraints
+    if (model.combinedUniques) {
+      model.combinedUniques.forEach((uniqueFields) => {
+        constraints.push(`UNIQUE (${uniqueFields.join(", ")})`);
+      });
+    }
 
     if (columns.length === 0) {
       console.warn(
@@ -82,9 +108,9 @@ export class SqlGenerator {
       return `-- Skipping CREATE TABLE for ${tableName} as no valid columns were found.`;
     }
 
-    const allConstraints = [...columns, ...foreignKeys];
+    const allParts = [...columns, ...constraints];
 
-    const createTableSql = `CREATE TABLE ${tableName} (\n  ${allConstraints.join(
+    const createTableSql = `CREATE TABLE ${tableName} (\n  ${allParts.join(
       ",\n  "
     )}\n);`;
 

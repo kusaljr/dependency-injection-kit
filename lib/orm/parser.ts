@@ -39,7 +39,6 @@ export class Parser {
         currentToken.column
       );
       this.errors.push(error);
-
       throw error;
     }
   }
@@ -112,17 +111,33 @@ export class Parser {
     this.consume(TokenType.LCURLY, "Expected '{' after model name.");
 
     const fields: FieldNode[] = [];
+    const combinedUniques: string[][] = [];
+
     while (
       this.peek().type !== TokenType.RCURLY &&
       this.peek().type !== TokenType.EOF
     ) {
       if (this.peek().type === TokenType.IDENTIFIER) {
         fields.push(this.parseFieldDefinition());
+      } else if (this.peek().type === TokenType.COMPOSITE_BLOCK) {
+        const blockToken = this.advance();
+        if (blockToken.value === "@@unique") {
+          combinedUniques.push(this.parseCompositeUniqueFields());
+        } else {
+          this.errors.push(
+            new SyntaxError(
+              `Unsupported composite block '${blockToken.value}'`,
+              blockToken.line,
+              blockToken.column
+            )
+          );
+          this.advance();
+        }
       } else {
         const unexpectedToken = this.peek();
         this.errors.push(
           new SyntaxError(
-            `Unexpected token '${unexpectedToken.value}' inside model '${nameToken.value}'. Expected field definition or '}'.`,
+            `Unexpected token '${unexpectedToken.value}' inside model '${nameToken.value}'. Expected field definition, composite block, or '}'.`,
             unexpectedToken.line,
             unexpectedToken.column
           )
@@ -140,9 +155,43 @@ export class Parser {
       kind: "Model",
       name: nameToken.value,
       fields: fields,
+      combinedUniques: combinedUniques,
       line: modelKeywordToken.line,
       column: modelKeywordToken.column,
     };
+  }
+
+  private parseCompositeUniqueFields(): string[] {
+    this.consume(TokenType.LPAREN, "Expected '(' after @@unique");
+    this.consume(TokenType.LBRACKET, "Expected '[' after @@unique(");
+
+    const fields: string[] = [];
+
+    while (this.peek().type !== TokenType.RBRACKET) {
+      const idToken = this.consume(
+        TokenType.IDENTIFIER,
+        "Expected field name in @@unique"
+      );
+      fields.push(idToken.value);
+
+      if (this.peek().type === TokenType.COMMA) {
+        this.advance();
+      } else if (this.peek().type !== TokenType.RBRACKET) {
+        throw new SyntaxError(
+          "Expected ',' or ']' in @@unique field list",
+          this.peek().line,
+          this.peek().column
+        );
+      }
+    }
+
+    this.consume(
+      TokenType.RBRACKET,
+      "Expected ']' to close @@unique field list"
+    );
+    this.consume(TokenType.RPAREN, "Expected ')' after @@unique field list");
+
+    return fields;
   }
 
   private parseFieldDefinition(): FieldNode {
@@ -160,66 +209,130 @@ export class Parser {
     } else if (this.peek().type === TokenType.STRING_TYPE) {
       fieldTypeStr = "string";
       this.advance();
+    } else if (this.peek().type === TokenType.FLOAT_TYPE) {
+      fieldTypeStr = "float";
+      this.advance();
     } else if (this.peek().type === TokenType.IDENTIFIER) {
       fieldTypeStr = this.advance().value;
 
       if (this.peek().value === "[" && this.peek(1)?.value === "]") {
-        this.advance();
-        this.advance();
+        this.advance(); // [
+        this.advance(); // ]
         isArray = true;
       }
     } else {
       const token = this.peek();
-      const error = new SyntaxError(
+      throw new SyntaxError(
         `Expected field type ('int', 'string', or model name) after field '${nameToken.value}', but found '${token.value}' (${token.type}).`,
         token.line,
         token.column
       );
-      this.errors.push(error);
-      throw error;
     }
 
     let relation: FieldNode["relation"] | undefined = undefined;
+    let isPrimaryKey = false;
+    let isRequired = false;
+    let isUnique = false;
+    let defaultValue: string | number | boolean | object | undefined =
+      undefined;
 
-    if (this.peek().type === TokenType.AT) {
+    while (this.peek().type === TokenType.AT) {
       this.advance(); // consume @
       const decoratorToken = this.consume(
         TokenType.IDENTIFIER,
-        "Expected relation decorator name after '@'."
+        "Expected decorator name after '@'."
       );
-      const relationType = decoratorToken.value as RelationEnum;
+
+      const decoratorName = decoratorToken.value;
 
       if (
-        relationType !== "one_to_many" &&
-        relationType !== "many_to_one" &&
-        relationType !== "one_to_one"
+        decoratorName === "one_to_many" ||
+        decoratorName === "many_to_one" ||
+        decoratorName === "one_to_one"
       ) {
+        let foreignKey: string | undefined = undefined;
+
+        if (this.peek().type === TokenType.LPAREN) {
+          this.advance(); // (
+          const fkToken = this.consume(
+            TokenType.IDENTIFIER,
+            "Expected foreign key field inside relation decorator."
+          );
+          foreignKey = fkToken.value;
+          this.consume(
+            TokenType.RPAREN,
+            "Expected ')' to close relation decorator arguments."
+          );
+        }
+
+        relation = {
+          type: decoratorName as RelationEnum,
+          foreignKey,
+        };
+      } else if (decoratorName === "primary_key") {
+        isPrimaryKey = true;
+      } else if (decoratorName === "unique") {
+        isUnique = true;
+      } else if (decoratorName === "required") {
+        // 'required' is a synonym for 'not null'
+        if (defaultValue !== undefined) {
+          throw new SyntaxError(
+            `Field '${nameToken.value}' cannot have both @default and @required decorators.`,
+            decoratorToken.line,
+            decoratorToken.column
+          );
+        }
+        isRequired = true;
+      } else if (decoratorName === "default") {
+        this.consume(TokenType.LPAREN, "Expected '(' after '@default'.");
+
+        const valueToken = this.advance();
+        let rawValue: string = valueToken.value;
+
+        // Parse as number, boolean, string, or JSON object
+        if (valueToken.type === TokenType.NUMBER_LITERAL) {
+          defaultValue = Number(rawValue);
+        } else if (valueToken.type === TokenType.STRING_LITERAL) {
+          defaultValue = rawValue;
+        } else if (
+          valueToken.type === TokenType.IDENTIFIER &&
+          (rawValue === "true" || rawValue === "false")
+        ) {
+          defaultValue = rawValue === "true";
+        } else if (valueToken.type === TokenType.LCURLY) {
+          let objStr = "{";
+          let braceCount = 1;
+          while (braceCount > 0) {
+            const tok = this.advance();
+            objStr += tok.value;
+            if (tok.type === TokenType.LCURLY) braceCount++;
+            if (tok.type === TokenType.RCURLY) braceCount--;
+          }
+          try {
+            defaultValue = JSON.parse(objStr);
+          } catch {
+            throw new SyntaxError(
+              `Invalid JSON object in @default: ${objStr}`,
+              valueToken.line,
+              valueToken.column
+            );
+          }
+        } else {
+          throw new SyntaxError(
+            `Unsupported default value: '${rawValue}'`,
+            valueToken.line,
+            valueToken.column
+          );
+        }
+
+        this.consume(TokenType.RPAREN, "Expected ')' after @default value.");
+      } else {
         throw new SyntaxError(
-          `Unknown relation type '${relationType}'`,
+          `Unknown decorator '${decoratorName}'`,
           decoratorToken.line,
           decoratorToken.column
         );
       }
-
-      let foreignKey: string | undefined = undefined;
-
-      if (this.peek().type === TokenType.LPAREN) {
-        this.advance(); // (
-        const fkToken = this.consume(
-          TokenType.IDENTIFIER,
-          "Expected foreign key field inside relation decorator."
-        );
-        foreignKey = fkToken.value;
-        this.consume(
-          TokenType.RPAREN,
-          "Expected ')' to close relation decorator arguments."
-        );
-      }
-
-      relation = {
-        type: relationType,
-        foreignKey,
-      };
     }
 
     return {
@@ -228,6 +341,10 @@ export class Parser {
       fieldType: fieldTypeStr,
       isArray,
       relation,
+      isPrimaryKey,
+      isRequired,
+      isUnique,
+      defaultValue,
       line: nameToken.line,
       column: nameToken.column,
     };
