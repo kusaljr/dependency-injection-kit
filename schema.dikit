@@ -11,3 +11,7 @@ model product {
   user user @many_to_one(user_id)
 }
 
+model barcode {
+  id int
+  code string
+}

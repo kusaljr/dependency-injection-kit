@@ -13,9 +13,15 @@ export type product = {
   user: user;
 };
 
-export type ModelNames = "user" | "product";
+export type barcode = {
+  id: number;
+  code: string;
+};
+
+export type ModelNames = "user" | "product" | "barcode";
 
 export type Models = {
   user: user;
   product: product;
+  barcode: barcode;
 };
