@@ -1,10 +1,12 @@
 model user {
   id int
   name string
+  products product[] @one_to_many
 }
-
 
 model product {
   id int
   name string
+  user_id int
+  user user @many_to_one(user_id)
 }

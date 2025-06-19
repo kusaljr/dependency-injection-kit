@@ -2,24 +2,45 @@ import { SchemaNode } from "./ast";
 import { Models } from "./schema-types";
 
 type Condition<M extends Models, T extends keyof M> = Partial<M[T]>;
+type JoinType = "inner" | "left" | "right";
 
-class Query<M extends Models, T extends keyof M, F extends keyof M[T]> {
-  private selectedFields: F[] = [];
-  private conditions: Condition<M, T> = {};
-  private limitValue: number | null = null;
-  private offsetValue: number | null = null;
+interface JoinClause<M extends Models> {
+  target: keyof M;
+  type: JoinType;
+  on: string;
+}
+
+// Exclude self joins
+type CompatibleJoins<M, T extends keyof M> = Exclude<keyof M, T>;
+
+// Type-safe ON condition
+type JoinOn<M, T extends keyof M, J extends keyof M> = `${T &
+  string}.${keyof M[T] & string} = ${J & string}.${keyof M[J] & string}`;
+
+class Query<
+  M extends Models,
+  T extends keyof M,
+  F extends keyof M[T] = keyof M[T]
+> {
+  private selectedFields: F[];
+  private conditions: Condition<M, T>;
+  private joins: JoinClause<M>[];
+  private limitValue: number | null;
+  private offsetValue: number | null;
 
   constructor(
     private tableName: T,
     fields: F[] = [],
     conditions: Condition<M, T> = {},
-    limit?: number | null,
-    offset?: number | null
+    joins: JoinClause<M>[] = [],
+    limit: number | null = null,
+    offset: number | null = null
   ) {
     this.selectedFields = fields;
     this.conditions = conditions;
-    this.limitValue = limit ?? null;
-    this.offsetValue = offset ?? null;
+    this.joins = joins;
+    this.limitValue = limit;
+    this.offsetValue = offset;
   }
 
   public select<N extends keyof M[T]>(fields: N[]): Query<M, T, N> {
@@ -27,6 +48,7 @@ class Query<M extends Models, T extends keyof M, F extends keyof M[T]> {
       this.tableName,
       fields,
       this.conditions,
+      this.joins,
       this.limitValue,
       this.offsetValue
     );
@@ -37,6 +59,7 @@ class Query<M extends Models, T extends keyof M, F extends keyof M[T]> {
       this.tableName,
       this.selectedFields,
       conditions,
+      this.joins,
       this.limitValue,
       this.offsetValue
     );
@@ -47,6 +70,7 @@ class Query<M extends Models, T extends keyof M, F extends keyof M[T]> {
       this.tableName,
       this.selectedFields,
       this.conditions,
+      this.joins,
       n,
       this.offsetValue
     );
@@ -57,8 +81,46 @@ class Query<M extends Models, T extends keyof M, F extends keyof M[T]> {
       this.tableName,
       this.selectedFields,
       this.conditions,
+      this.joins,
       this.limitValue,
       n
+    );
+  }
+
+  public innerJoin<J extends CompatibleJoins<M, T>>(
+    target: J,
+    on: JoinOn<M, T, J>
+  ): Query<M, T, F> {
+    return this.addJoin("inner", target, on);
+  }
+
+  public leftJoin<J extends CompatibleJoins<M, T>>(
+    target: J,
+    on: JoinOn<M, T, J>
+  ): Query<M, T, F> {
+    return this.addJoin("left", target, on);
+  }
+
+  public rightJoin<J extends CompatibleJoins<M, T>>(
+    target: J,
+    on: JoinOn<M, T, J>
+  ): Query<M, T, F> {
+    return this.addJoin("right", target, on);
+  }
+
+  private addJoin<J extends keyof M>(
+    type: JoinType,
+    target: J,
+    on: string
+  ): Query<M, T, F> {
+    const newJoins = [...this.joins, { target, type, on }];
+    return new Query(
+      this.tableName,
+      this.selectedFields,
+      this.conditions,
+      newJoins,
+      this.limitValue,
+      this.offsetValue
     );
   }
 
@@ -66,6 +128,12 @@ class Query<M extends Models, T extends keyof M, F extends keyof M[T]> {
     const fieldsStr =
       this.selectedFields.length > 0 ? this.selectedFields.join(", ") : "*";
     let query = `SELECT ${fieldsStr} FROM ${String(this.tableName)}`;
+
+    this.joins.forEach((join) => {
+      query += ` ${join.type.toUpperCase()} JOIN ${String(join.target)} ON ${
+        join.on
+      }`;
+    });
 
     const whereClauses = Object.entries(this.conditions)
       .map(([field, value]) => `${field} = ${JSON.stringify(value)}`)
@@ -89,11 +157,32 @@ class Table<M extends Models, T extends keyof M> {
   constructor(private tableName: T) {}
 
   public select<F extends keyof M[T]>(fields: F[]): Query<M, T, F> {
-    return new Query<M, T, F>(this.tableName, fields);
+    return new Query(this.tableName, fields);
   }
 
   public where(conditions: Condition<M, T>): Query<M, T, keyof M[T]> {
-    return new Query<M, T, keyof M[T]>(this.tableName, [], conditions);
+    return new Query(this.tableName, [], conditions);
+  }
+
+  public innerJoin<J extends CompatibleJoins<M, T>>(
+    target: J,
+    on: JoinOn<M, T, J>
+  ): Query<M, T, keyof M[T]> {
+    return new Query(this.tableName, [], {}, [{ target, type: "inner", on }]);
+  }
+
+  public leftJoin<J extends CompatibleJoins<M, T>>(
+    target: J,
+    on: JoinOn<M, T, J>
+  ): Query<M, T, keyof M[T]> {
+    return new Query(this.tableName, [], {}, [{ target, type: "left", on }]);
+  }
+
+  public rightJoin<J extends CompatibleJoins<M, T>>(
+    target: J,
+    on: JoinOn<M, T, J>
+  ): Query<M, T, keyof M[T]> {
+    return new Query(this.tableName, [], {}, [{ target, type: "right", on }]);
   }
 }
 

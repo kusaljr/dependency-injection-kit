@@ -13,6 +13,13 @@ export enum TokenType {
   EOF = "EOF",
 
   UNKNOWN = "UNKNOWN",
+
+  AT = "AT", // @
+  LPAREN = "LPAREN", // (
+  RPAREN = "RPAREN", // )
+  COMMA = "COMMA", // ,
+  LBRACKET = "LBRACKET", // [
+  RBRACKET = "RBRACKET", // ]
 }
 
 export interface Token {
@@ -83,6 +90,24 @@ export class Lexer {
       case "}":
         this.advance();
         return this.createToken(TokenType.RCURLY, "}");
+      case "@":
+        this.advance();
+        return this.createToken(TokenType.AT, "@");
+      case "(":
+        this.advance();
+        return this.createToken(TokenType.LPAREN, "(");
+      case ")":
+        this.advance();
+        return this.createToken(TokenType.RPAREN, ")");
+      case ",":
+        this.advance();
+        return this.createToken(TokenType.COMMA, ",");
+      case "[":
+        this.advance();
+        return this.createToken(TokenType.LBRACKET, "[");
+      case "]":
+        this.advance();
+        return this.createToken(TokenType.RBRACKET, "]");
     }
 
     if (/[a-zA-Z_]/.test(char!)) {

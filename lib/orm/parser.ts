@@ -1,4 +1,4 @@
-import { FieldNode, ModelNode, SchemaNode } from "./ast";
+import { FieldNode, ModelNode, RelationEnum, SchemaNode } from "./ast";
 import { Token, TokenType } from "./lexer";
 
 export class SyntaxError extends Error {
@@ -17,8 +17,8 @@ export class Parser {
     this.tokens = tokens;
   }
 
-  private peek(): Token {
-    return this.tokens[this.currentTokenIndex];
+  private peek(offset: number = 0): Token {
+    return this.tokens[this.currentTokenIndex + offset];
   }
 
   private advance(): Token {
@@ -150,29 +150,84 @@ export class Parser {
       TokenType.IDENTIFIER,
       "Expected field name (identifier)."
     );
-    let fieldType: "int" | "string";
-    const typeToken = this.peek();
 
-    if (typeToken.type === TokenType.INT_TYPE) {
-      fieldType = "int";
+    let fieldTypeStr = "";
+    let isArray = false;
+
+    if (this.peek().type === TokenType.INT_TYPE) {
+      fieldTypeStr = "int";
       this.advance();
-    } else if (typeToken.type === TokenType.STRING_TYPE) {
-      fieldType = "string";
+    } else if (this.peek().type === TokenType.STRING_TYPE) {
+      fieldTypeStr = "string";
       this.advance();
+    } else if (this.peek().type === TokenType.IDENTIFIER) {
+      fieldTypeStr = this.advance().value;
+
+      if (this.peek().value === "[" && this.peek(1)?.value === "]") {
+        this.advance();
+        this.advance();
+        isArray = true;
+      }
     } else {
+      const token = this.peek();
       const error = new SyntaxError(
-        `Expected field type ('int' or 'string') after field name '${nameToken.value}'. Found '${typeToken.value}' (${typeToken.type}).`,
-        typeToken.line,
-        typeToken.column
+        `Expected field type ('int', 'string', or model name) after field '${nameToken.value}', but found '${token.value}' (${token.type}).`,
+        token.line,
+        token.column
       );
       this.errors.push(error);
       throw error;
     }
 
+    let relation: FieldNode["relation"] | undefined = undefined;
+
+    if (this.peek().type === TokenType.AT) {
+      this.advance(); // consume @
+      const decoratorToken = this.consume(
+        TokenType.IDENTIFIER,
+        "Expected relation decorator name after '@'."
+      );
+      const relationType = decoratorToken.value as RelationEnum;
+
+      if (
+        relationType !== "one_to_many" &&
+        relationType !== "many_to_one" &&
+        relationType !== "one_to_one"
+      ) {
+        throw new SyntaxError(
+          `Unknown relation type '${relationType}'`,
+          decoratorToken.line,
+          decoratorToken.column
+        );
+      }
+
+      let foreignKey: string | undefined = undefined;
+
+      if (this.peek().type === TokenType.LPAREN) {
+        this.advance(); // (
+        const fkToken = this.consume(
+          TokenType.IDENTIFIER,
+          "Expected foreign key field inside relation decorator."
+        );
+        foreignKey = fkToken.value;
+        this.consume(
+          TokenType.RPAREN,
+          "Expected ')' to close relation decorator arguments."
+        );
+      }
+
+      relation = {
+        type: relationType,
+        foreignKey,
+      };
+    }
+
     return {
       kind: "Field",
       name: nameToken.value,
-      fieldType: fieldType,
+      fieldType: fieldTypeStr,
+      isArray,
+      relation,
       line: nameToken.line,
       column: nameToken.column,
     };

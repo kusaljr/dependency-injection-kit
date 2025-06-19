@@ -6,32 +6,43 @@ type AST = {
     fields: {
       kind: "Field";
       name: string;
-      fieldType: "int" | "string";
+      fieldType: "int" | "string" | string; // string for model ref
+      isArray?: boolean;
     }[];
   }[];
 };
 
 export function generateTypeCode(ast: AST): string {
-  const modelEntries = ast.models
+  const modelNames = ast.models.map((m) => `"${m.name}"`).join(" | ");
+
+  const modelTypes = ast.models
     .map((model) => {
       const fields = model.fields
         .map((field) => {
-          const tsType = field.fieldType === "int" ? "number" : "string";
-          return `    ${field.name}: ${tsType};`;
+          const tsType = mapFieldType(field);
+          return `  ${field.name}: ${tsType};`;
         })
         .join("\n");
-
-      return `  ${model.name}: {\n${fields}\n  };`;
+      return `export type ${model.name} = {\n${fields}\n};`;
     })
-    .join("\n");
+    .join("\n\n");
+
+  const modelsMapping = `export type Models = {\n${ast.models
+    .map((m) => `  ${m.name}: ${m.name};`)
+    .join("\n")}\n};`;
 
   return `// AUTO-GENERATED FILE. DO NOT EDIT.
 
-export type Models = {
-${modelEntries}
-};
+${modelTypes}
 
-export type ModelNames = keyof Models;
-export type FieldsOf<M extends ModelNames> = keyof Models[M];
+export type ModelNames = ${modelNames};
+
+${modelsMapping}
 `.trim();
+}
+
+function mapFieldType(field: AST["models"][0]["fields"][0]): string {
+  if (field.fieldType === "int") return "number";
+  if (field.fieldType === "string") return "string";
+  return field.isArray ? `${field.fieldType}[]` : field.fieldType;
 }

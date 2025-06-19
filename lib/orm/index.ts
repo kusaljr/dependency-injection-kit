@@ -3,7 +3,6 @@ import path from "path";
 import { Lexer, Token } from "./lexer";
 import { Parser } from "./parser";
 import { DB } from "./query-builder";
-import { Models } from "./schema-types";
 import { SemanticAnalyzer, SemanticError } from "./semantic-analyzer";
 import { SqlGenerator } from "./sql-generator";
 import { generateTypeCode } from "./type-generator";
@@ -50,7 +49,7 @@ if (semanticErrors.length > 0) {
 
 console.log("\n--- Schema Successfully Validated! ---");
 console.log("AST (Simplified View):");
-console.log(JSON.stringify(ast, null, 2));
+// console.log(JSON.stringify(ast, null, 2));
 
 ast.models.forEach((model) => {
   console.log(`  Model: ${model.name}`);
@@ -81,14 +80,11 @@ fs.writeFileSync(outPath, typeCode, { encoding: "utf8" });
 
 console.log(`✅ Type definitions written to ${outPath}`);
 
-const db = new DB<Models>(ast);
+const db = new DB(ast);
 
-const query = db
-  .table("user")
-  .where({ id: 1 })
-  .select(["id", "name"])
-  .limit(1)
-  .offset(1)
-  .build();
+const query = db.table("user").select(["id", "name"]).where({
+  id: 1,
+  name: "John Doe",
+});
 
 console.log(query);
