@@ -56,6 +56,12 @@ interface JoinClause<M extends Models> {
   on: string;
 }
 
+// Assuming a generic return type for methods that build prepared statements
+interface PreparedStatement {
+  sql: string;
+  params: any[];
+}
+
 class Query<
   M extends Models,
   T extends keyof M,
@@ -201,23 +207,34 @@ class Query<
     );
   }
 
-  public _update(values: UpdateValues<M, T>): string {
-    const setClauses = Object.entries(values)
-      .map(([field, value]) => `${String(field)} = ${JSON.stringify(value)}`)
-      .join(", ");
+  public _update(values: UpdateValues<M, T>): PreparedStatement {
+    const setClauses: string[] = [];
+    const updateParams: any[] = [];
 
-    if (!setClauses) {
+    for (const field in values) {
+      if (values.hasOwnProperty(field)) {
+        setClauses.push(`${String(field)} = ?`);
+        updateParams.push(values[field]);
+      }
+    }
+
+    if (setClauses.length === 0) {
       throw new Error("No values provided for update.");
     }
 
-    let query = `UPDATE ${String(this.tableName)} SET ${setClauses}`;
+    let sql = `UPDATE ${String(this.tableName)} SET ${setClauses.join(", ")}`;
+    const whereClauses: string[] = [];
+    const whereParams: any[] = [];
 
-    const whereClauses = Object.entries(this.conditions)
-      .map(([field, value]) => `${String(field)} = ${JSON.stringify(value)}`)
-      .join(" AND ");
+    for (const field in this.conditions) {
+      if (this.conditions.hasOwnProperty(field)) {
+        whereClauses.push(`${String(field)} = ?`);
+        whereParams.push(this.conditions[field]);
+      }
+    }
 
-    if (whereClauses) {
-      query += ` WHERE ${whereClauses}`;
+    if (whereClauses.length > 0) {
+      sql += ` WHERE ${whereClauses.join(" AND ")}`;
     } else {
       console.warn(
         `WARNING: UPDATE statement for table '${String(
@@ -225,18 +242,23 @@ class Query<
         )}' has no WHERE clause. All rows will be updated.`
       );
     }
-    return query;
+    return { sql, params: [...updateParams, ...whereParams] };
   }
 
-  public _delete(): string {
-    let query = `DELETE FROM ${String(this.tableName)}`;
+  public _delete(): PreparedStatement {
+    let sql = `DELETE FROM ${String(this.tableName)}`;
+    const whereClauses: string[] = [];
+    const whereParams: any[] = [];
 
-    const whereClauses = Object.entries(this.conditions)
-      .map(([field, value]) => `${String(field)} = ${JSON.stringify(value)}`)
-      .join(" AND ");
+    for (const field in this.conditions) {
+      if (this.conditions.hasOwnProperty(field)) {
+        whereClauses.push(`${String(field)} = ?`);
+        whereParams.push(this.conditions[field]);
+      }
+    }
 
-    if (whereClauses) {
-      query += ` WHERE ${whereClauses}`;
+    if (whereClauses.length > 0) {
+      sql += ` WHERE ${whereClauses.join(" AND ")}`;
     } else {
       console.warn(
         `WARNING: DELETE statement for table '${String(
@@ -244,10 +266,10 @@ class Query<
         )}' has no WHERE clause. All rows will be deleted.`
       );
     }
-    return query;
+    return { sql, params: whereParams };
   }
 
-  public build(): string {
+  public build(): string | PreparedStatement {
     if (this.updateValues) {
       return this._update(this.updateValues);
     }
@@ -346,17 +368,19 @@ class Table<M extends Models, T extends keyof M> {
     );
   }
 
-  public insert(values: InsertValues<M, T>): string {
+  public insert(values: InsertValues<M, T>): PreparedStatement {
     const fields = Object.keys(values);
-    const valuesList = Object.values(values).map((v) => JSON.stringify(v)); // Convert values to JSON strings for SQL
+    const placeholders = fields.map(() => "?").join(", ");
+    const params = Object.values(values);
 
     if (fields.length === 0) {
       throw new Error("No values provided for insertion.");
     }
 
-    return `INSERT INTO ${String(this.tableName)} (${fields.join(
+    const sql = `INSERT INTO ${String(this.tableName)} (${fields.join(
       ", "
-    )}) VALUES (${valuesList.join(", ")})`;
+    )}) VALUES (${placeholders})`;
+    return { sql, params };
   }
 
   public update(

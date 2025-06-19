@@ -82,6 +82,13 @@ console.log(`✅ Type definitions written to ${outPath}`);
 
 const db = new DB(ast);
 
-const query = db.table("product").delete().where({ id: 1 }).build();
+const query = db
+  .table("product")
+  .update({
+    name: "Sample Product",
+    price: 19.99,
+  })
+  .where({ name: "Sample Product" })
+  .build();
 
 console.log(query);
