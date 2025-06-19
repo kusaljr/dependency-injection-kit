@@ -1,0 +1,34 @@
+{
+  "name": "dikit-syntax",
+  "displayName": "Dikit Schema Syntax",
+  "description": "Syntax highlighting for .dikit schema files",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.0.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "dikit",
+        "aliases": [
+          "Dikit",
+          "dikit"
+        ],
+        "extensions": [
+          ".dikit"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dikit",
+        "scopeName": "source.dikit",
+        "path": "./syntaxes/dikit.tmLanguage.json"
+      }
+    ]
+  }
+}

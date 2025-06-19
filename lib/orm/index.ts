@@ -2,7 +2,6 @@ import * as fs from "fs";
 import path from "path";
 import { Lexer, Token } from "./lexer";
 import { Parser } from "./parser";
-import { DB } from "./query-builder";
 import { SemanticAnalyzer, SemanticError } from "./semantic-analyzer";
 import { SqlGenerator } from "./sql-generator";
 import { generateTypeCode } from "./type-generator";
@@ -80,11 +79,8 @@ fs.writeFileSync(outPath, typeCode, { encoding: "utf8" });
 
 console.log(`✅ Type definitions written to ${outPath}`);
 
-const db = new DB(ast);
+// const db = new DB(ast);
 
-const query = db.table("user").select(["id", "name"]).where({
-  id: 1,
-  name: "John Doe",
-});
+// // const query = db.table("user").leftJoin("product", "")
 
-console.log(query);
+// console.log(query);

@@ -1,0 +1,82 @@
+{
+  "files.associations": {
+    "*.dikit": "dikit"
+  },
+  "editor.tokenColorCustomizations": {
+    "textMateRules": [
+      {
+        "name": "Dikit Model Keyword",
+        "scope": "keyword.control.dikit",
+        "settings": {
+          "foreground": "#C586C0",
+          "fontStyle": "bold"
+        }
+      },
+      {
+        "name": "Dikit Model Names",
+        "scope": "entity.name.type.model.dikit",
+        "settings": {
+          "foreground": "#4EC9B0",
+          "fontStyle": "bold"
+        }
+      },
+      {
+        "name": "Dikit Field Names",
+        "scope": "variable.other.property.dikit",
+        "settings": {
+          "foreground": "#9CDCFE"
+        }
+      },
+      {
+        "name": "Dikit Types",
+        "scope": "storage.type.dikit, storage.type.primitive.dikit",
+        "settings": {
+          "foreground": "#569CD6"
+        }
+      },
+      {
+        "name": "Dikit Decorators",
+        "scope": "entity.name.function.decorator.dikit",
+        "settings": {
+          "foreground": "#DCDCAA"
+        }
+      },
+      {
+        "name": "Dikit Decorator Parameters",
+        "scope": "variable.parameter.dikit",
+        "settings": {
+          "foreground": "#CE9178"
+        }
+      },
+      {
+        "name": "Dikit Array Brackets",
+        "scope": "punctuation.definition.array.dikit",
+        "settings": {
+          "foreground": "#DA70D6"
+        }
+      },
+      {
+        "name": "Dikit Comments",
+        "scope": "comment.line.double-slash.dikit, comment.block.dikit",
+        "settings": {
+          "foreground": "#6A9955",
+          "fontStyle": "italic"
+        }
+      }
+    ]
+  },
+  "workbench.colorCustomizations": {
+    "editorBracketHighlight.foreground1": "#DA70D6",
+    "editorBracketHighlight.foreground2": "#FFD700",
+    "editorBracketHighlight.foreground3": "#87CEEB"
+  },
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": true,
+  "[dikit]": {
+    "editor.wordWrap": "on",
+    "editor.formatOnSave": false,
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2
+  },
+  "postman.settings.dotenv-detection-notification-visibility": false
+}

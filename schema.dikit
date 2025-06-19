@@ -10,3 +10,4 @@ model product {
   user_id int
   user user @many_to_one(user_id)
 }
+

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Dikit Schema",
+  "scopeName": "source.dikit",
+  "fileTypes": ["dikit"],
+  "patterns": [
+    {
+      "include": "#model-definition"
+    },
+    {
+      "include": "#field-definition"
+    },
+    {
+      "include": "#decorators"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#comments"
+    }
+  ],
+  "repository": {
+    "model-definition": {
+      "begin": "\\b(model)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.dikit"
+        },
+        "2": {
+          "name": "entity.name.type.model.dikit"
+        }
+      },
+      "end": "\\}",
+      "patterns": [
+        {
+          "include": "#field-definition"
+        },
+        {
+          "include": "#decorators"
+        }
+      ]
+    },
+    "field-definition": {
+      "match": "^\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(\\[\\])?",
+      "captures": {
+        "1": {
+          "name": "variable.other.property.dikit"
+        },
+        "2": {
+          "name": "storage.type.dikit"
+        },
+        "3": {
+          "name": "punctuation.definition.array.dikit"
+        }
+      }
+    },
+    "decorators": {
+      "patterns": [
+        {
+          "match": "@([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "0": {
+              "name": "entity.name.function.decorator.dikit"
+            }
+          }
+        },
+        {
+          "begin": "@([a-zA-Z_][a-zA-Z0-9_]*)\\(",
+          "beginCaptures": {
+            "1": {
+              "name": "entity.name.function.decorator.dikit"
+            }
+          },
+          "end": "\\)",
+          "patterns": [
+            {
+              "match": "[a-zA-Z_][a-zA-Z0-9_]*",
+              "name": "variable.parameter.dikit"
+            }
+          ]
+        }
+      ]
+    },
+    "types": {
+      "match": "\\b(int|string|float|boolean|date|datetime|text)\\b",
+      "name": "storage.type.primitive.dikit"
+    },
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.dikit",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.dikit",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    }
+  }
+}
