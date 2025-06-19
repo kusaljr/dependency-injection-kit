@@ -43,6 +43,11 @@ ${modelsMapping}
 
 function mapFieldType(field: AST["models"][0]["fields"][0]): string {
   if (field.fieldType === "int" || field.fieldType === "float") return "number";
-  if (field.fieldType === "string") return "string";
+  if (
+    field.fieldType === "string" ||
+    field.fieldType === "date" ||
+    field.fieldType === "datetime"
+  )
+    return "string";
   return field.isArray ? `${field.fieldType}[]` : field.fieldType;
 }
