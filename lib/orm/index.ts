@@ -1,7 +1,12 @@
+import * as fs from "fs";
+import path from "path";
 import { Lexer, Token } from "./lexer";
 import { Parser } from "./parser";
-import { SemanticAnalyzer, SemanticError } from "./semantic_analyzer";
+import { DB } from "./query-builder";
+import { Models } from "./schema-types";
+import { SemanticAnalyzer, SemanticError } from "./semantic-analyzer";
 import { SqlGenerator } from "./sql-generator";
+import { generateTypeCode } from "./type-generator";
 
 const schemaFilePath = "schema.dikit";
 
@@ -45,7 +50,7 @@ if (semanticErrors.length > 0) {
 
 console.log("\n--- Schema Successfully Validated! ---");
 console.log("AST (Simplified View):");
-// console.log(JSON.stringify(ast, null, 2));
+console.log(JSON.stringify(ast, null, 2));
 
 ast.models.forEach((model) => {
   console.log(`  Model: ${model.name}`);
@@ -66,3 +71,24 @@ if (sqlStatements.length > 0) {
 } else {
   console.log("No SQL statements generated.");
 }
+
+const typeCode = generateTypeCode(ast);
+
+// Output file path
+const outPath = path.join(__dirname, "schema-types.ts");
+
+fs.writeFileSync(outPath, typeCode, { encoding: "utf8" });
+
+console.log(`✅ Type definitions written to ${outPath}`);
+
+const db = new DB<Models>(ast);
+
+const query = db
+  .table("user")
+  .where({ id: 1 })
+  .select(["id", "name"])
+  .limit(1)
+  .offset(1)
+  .build();
+
+console.log(query);
