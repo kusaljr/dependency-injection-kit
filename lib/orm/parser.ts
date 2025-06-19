@@ -205,7 +205,8 @@ export class Parser {
       typeToken.type === TokenType.INT_TYPE ||
       typeToken.type === TokenType.STRING_TYPE ||
       typeToken.type === TokenType.FLOAT_TYPE ||
-      typeToken.type === TokenType.BOOLEAN_TYPE
+      typeToken.type === TokenType.BOOLEAN_TYPE ||
+      typeToken.type === TokenType.DATETIME_TYPE
     ) {
       fieldType = typeToken.value;
       this.advance();
@@ -245,7 +246,7 @@ export class Parser {
     let isPrimaryKey = false;
     let isRequired = false;
     let isUnique = false;
-    let defaultValue: any;
+    let defaultValue: any; // Using 'any' as it can be literal or object
 
     while (this.peek().type === TokenType.AT) {
       this.advance();
@@ -272,17 +273,42 @@ export class Parser {
       } else if (decoName === "required") {
         isRequired = true;
       } else if (decoName === "default") {
-        this.consume(TokenType.LPAREN, "Expected '(' after @default");
-        const valTok = this.advance();
+        this.consume(TokenType.LPAREN, "Expected '(' after @default"); // Consume opening paren for @default
+
+        const valTok = this.peek(); // Peek, don't advance yet
+
         if (valTok.type === TokenType.NUMBER_LITERAL) {
-          defaultValue = Number(valTok.value);
+          defaultValue = Number(this.advance().value);
         } else if (valTok.type === TokenType.STRING_LITERAL) {
-          defaultValue = valTok.value;
-        } else if (
-          valTok.type === TokenType.IDENTIFIER &&
-          ["true", "false"].includes(valTok.value)
-        ) {
-          defaultValue = valTok.value === "true";
+          defaultValue = this.advance().value;
+        } else if (valTok.type === TokenType.IDENTIFIER) {
+          if (["true", "false"].includes(valTok.value)) {
+            defaultValue = this.advance().value === "true";
+          } else if (valTok.value === "autoincrement") {
+            this.advance(); // consume 'autoincrement'
+            this.consume(TokenType.LPAREN, "Expected '(' after autoincrement"); // consume '(' of autoincrement()
+            this.consume(
+              TokenType.RPAREN,
+              "Expected ')' after autoincrement()"
+            ); // consume ')' of autoincrement()
+            defaultValue = { kind: "FunctionCall", name: "autoincrement" };
+          } else if (valTok.value === "uuid") {
+            this.advance(); // consume 'uuid'
+            this.consume(TokenType.LPAREN, "Expected '(' after uuid"); // consume '(' of uuid()
+            this.consume(TokenType.RPAREN, "Expected ')' after uuid()"); // consume ')' of uuid()
+            defaultValue = { kind: "FunctionCall", name: "uuid" };
+          } else if (valTok.value === "now") {
+            this.advance(); // consume 'now'
+            this.consume(TokenType.LPAREN, "Expected '(' after now"); // consume '(' of now()
+            this.consume(TokenType.RPAREN, "Expected ')' after now()"); // consume ')' of now()
+            defaultValue = { kind: "FunctionCall", name: "now" };
+          } else {
+            throw new SyntaxError(
+              `Invalid default value '${valTok.value}'`,
+              valTok.line,
+              valTok.column
+            );
+          }
         } else {
           throw new SyntaxError(
             `Invalid default value '${valTok.value}'`,
@@ -290,6 +316,7 @@ export class Parser {
             valTok.column
           );
         }
+        // This RPAREN is for the @default() wrapper
         this.consume(TokenType.RPAREN, "Expected ')' after @default value");
       } else {
         throw new SyntaxError(
@@ -332,6 +359,7 @@ export class Parser {
         typeTok.type !== TokenType.STRING_TYPE &&
         typeTok.type !== TokenType.FLOAT_TYPE &&
         typeTok.type !== TokenType.BOOLEAN_TYPE &&
+        typeTok.type !== TokenType.DATETIME_TYPE &&
         typeTok.type !== TokenType.IDENTIFIER
       ) {
         throw new SyntaxError(

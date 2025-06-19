@@ -43,7 +43,7 @@ export interface FieldNode extends AstNode {
   isUnique?: boolean;
   isNullable?: boolean;
   isRequired?: boolean;
-  defaultValue?: string | number | boolean | object;
+  defaultValue?: string | number | boolean | { [key: string]: any }; // support default values, including JSON objects
   jsonTypeDefinition?: JsonTypeDefinitionNode; // NEW: inline JSON type definition
 }
 

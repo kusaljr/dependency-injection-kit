@@ -12,7 +12,6 @@ const schemaFilePath = "schema.dikit";
 console.log(`Processing schema from: ${schemaFilePath}\n`);
 
 const tokens: Token[] = Lexer.fromFile(schemaFilePath);
-console.log(tokens);
 
 if (tokens.length === 0) {
   console.error("No tokens generated. Cannot parse or analyze.");
@@ -49,7 +48,7 @@ if (semanticErrors.length > 0) {
 }
 
 console.log("\n--- Schema Successfully Validated! ---");
-console.log("AST (Simplified View):");
+// console.log("AST (Simplified View):");
 console.log(JSON.stringify(ast, null, 2));
 
 ast.models.forEach((model) => {

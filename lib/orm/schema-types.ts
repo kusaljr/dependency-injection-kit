@@ -17,6 +17,9 @@ export type product = {
 export type barcode = {
   id: number;
   code: string;
+  is_active: boolean;
+  created_at: datetime;
+  updated_at: datetime;
 };
 
 export type ModelNames = "user" | "product" | "barcode";

@@ -9,6 +9,7 @@ export enum TokenType {
   FLOAT_TYPE = "FLOAT_TYPE",
   BOOLEAN_TYPE = "BOOLEAN_TYPE",
   JSON_TYPE = "JSON_TYPE",
+  DATETIME_TYPE = "DATETIME_TYPE",
 
   COLON = "COLON", // :
 
@@ -29,6 +30,7 @@ export enum TokenType {
 
   EOF = "EOF",
   UNKNOWN = "UNKNOWN",
+  type = "type",
 }
 
 export interface Token {
@@ -165,6 +167,8 @@ export class Lexer {
               return this.createToken(TokenType.BOOLEAN_TYPE, value);
             case "json":
               return this.createToken(TokenType.JSON_TYPE, value);
+            case "datetime":
+              return this.createToken(TokenType.DATETIME_TYPE, value);
             default:
               return this.createToken(TokenType.IDENTIFIER, value);
           }

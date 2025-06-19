@@ -1,5 +1,5 @@
 model user {
-  id int @primary_key
+  id int @primary_key @default(autoincrement())
   name string @unique
   products product[] @one_to_many
 }
@@ -15,7 +15,10 @@ model product {
 }
 
 model barcode {
-  id int @primary_key
-  code string
+  id int @primary_key @default(autoincrement())
+  code string @unique @required
+  is_active boolean @default(true)
 
+  created_at datetime @default(now()) 
+  updated_at datetime 
 }
