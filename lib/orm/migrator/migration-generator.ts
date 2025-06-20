@@ -1,4 +1,4 @@
-import { ModelNode, SchemaNode } from "../core/ast";
+import { FieldNode, ModelNode, SchemaNode } from "../core/ast";
 
 export type DbDialect = "postgresql" | "mysql" | "sqlite" | "generic";
 
@@ -92,8 +92,7 @@ export class SqlGenerator {
     }
 
     for (const prevModel of prev.models) {
-      const currModel = curr.models.find((m) => m.name === prevModel.name);
-      if (!currModel) {
+      if (!curr.models.find((m) => m.name === prevModel.name)) {
         stmts.push(`DROP TABLE ${prevModel.name};`);
       }
     }
@@ -112,18 +111,105 @@ export class SqlGenerator {
 
       const prevField = prevModel.fields.find((f) => f.name === field.name);
       if (!prevField) {
-        const columnSql = this.generateColumnDefinition(field);
-        stmts.push(`ALTER TABLE ${currModel.name} ADD COLUMN ${columnSql};`);
+        const colSql = this.generateColumnDefinition(field);
+        stmts.push(`ALTER TABLE ${currModel.name} ADD COLUMN ${colSql};`);
+      } else {
+        stmts.push(
+          ...this.generateColumnAlterStatements(
+            currModel.name,
+            prevField,
+            field
+          )
+        );
       }
     }
 
     for (const prevField of prevModel.fields) {
       if (!this.isRealColumn(prevField)) continue;
 
-      const currField = currModel.fields.find((f) => f.name === prevField.name);
-      if (!currField) {
+      if (!currModel.fields.find((f) => f.name === prevField.name)) {
         stmts.push(
           `ALTER TABLE ${currModel.name} DROP COLUMN ${prevField.name};`
+        );
+      }
+    }
+
+    return stmts;
+  }
+
+  private generateColumnAlterStatements(
+    tableName: string,
+    prevField: FieldNode,
+    currField: FieldNode
+  ): string[] {
+    const stmts: string[] = [];
+
+    // Nullability change, protect PK
+    if (prevField.isRequired !== currField.isRequired) {
+      if (currField.isRequired) {
+        stmts.push(
+          `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} SET NOT NULL;`
+        );
+      } else {
+        if (prevField.isPrimaryKey) {
+          stmts.push(
+            `-- WARNING: Attempt to DROP NOT NULL on primary key column ${currField.name} skipped.`
+          );
+        } else {
+          stmts.push(
+            `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} DROP NOT NULL;`
+          );
+        }
+      }
+    }
+
+    // Default value change
+    if (
+      JSON.stringify(prevField.defaultValue) !==
+      JSON.stringify(currField.defaultValue)
+    ) {
+      if (currField.defaultValue === undefined) {
+        stmts.push(
+          `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} DROP DEFAULT;`
+        );
+      } else {
+        let defaultVal = "";
+        if (
+          typeof currField.defaultValue === "object" &&
+          currField.defaultValue.kind === "FunctionCall"
+        ) {
+          defaultVal = this.handleDefaultFunction(
+            currField.defaultValue.name
+          ).replace(/^ DEFAULT /, "");
+        } else {
+          defaultVal =
+            typeof currField.defaultValue === "string"
+              ? `'${currField.defaultValue}'`
+              : String(currField.defaultValue);
+        }
+        stmts.push(
+          `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} SET DEFAULT ${defaultVal};`
+        );
+      }
+    }
+
+    // Type change
+    if (currField.fieldType !== prevField.fieldType) {
+      const sqlType = this.mapFieldTypeToSql(currField.fieldType);
+      if (sqlType) {
+        stmts.push(
+          `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} TYPE ${sqlType};`
+        );
+      }
+    }
+
+    // Unique change (single column)
+    if (prevField.isUnique !== currField.isUnique) {
+      if (currField.isUnique) {
+        stmts.push(`ALTER TABLE ${tableName} ADD UNIQUE (${currField.name});`);
+      } else {
+        stmts.push(
+          `-- WARNING: UNIQUE constraint removal for ${currField.name} not automated. Please drop constraint manually if needed.`
         );
       }
     }
@@ -148,24 +234,23 @@ export class SqlGenerator {
     }
 
     model.fields.forEach((field) => {
-      if (field.relation && field.relation.foreignKey) {
+      if (field.relation?.foreignKey) {
         constraints.push(
           `FOREIGN KEY (${field.relation.foreignKey}) REFERENCES ${field.fieldType}(id)`
         );
       }
     });
 
-    const allParts = [...columns, ...constraints];
-    return `CREATE TABLE ${model.name} (\n  ${allParts.join(",\n  ")}\n);`;
+    return `CREATE TABLE ${model.name} (\n  ${[...columns, ...constraints].join(
+      ",\n  "
+    )}\n);`;
   }
 
-  private generateColumnDefinition(field: ModelNode["fields"][0]): string {
+  private generateColumnDefinition(field: FieldNode): string {
     const sqlType = this.mapFieldTypeToSql(field.fieldType);
-    if (!sqlType) {
-      throw new Error(`No SQL type for field type ${field.fieldType}`);
-    }
+    if (!sqlType) throw new Error(`No SQL type for ${field.fieldType}`);
 
-    let colDef = `${field.name} ${sqlType}`;
+    let col = `${field.name} ${sqlType}`;
 
     if (field.isPrimaryKey) {
       if (
@@ -177,47 +262,41 @@ export class SqlGenerator {
           case "postgresql":
             return `${field.name} SERIAL PRIMARY KEY`;
           case "mysql":
-            colDef += " PRIMARY KEY AUTO_INCREMENT";
+            col += " PRIMARY KEY AUTO_INCREMENT";
             break;
           case "sqlite":
-            colDef += " PRIMARY KEY AUTOINCREMENT";
+            col += " PRIMARY KEY AUTOINCREMENT";
             break;
           default:
-            colDef += " PRIMARY KEY";
+            col += " PRIMARY KEY";
         }
       } else {
-        colDef += " PRIMARY KEY";
+        col += " PRIMARY KEY";
       }
     }
 
-    if (field.isUnique) {
-      colDef += " UNIQUE";
-    }
+    if (field.isUnique) col += " UNIQUE";
 
     if (field.defaultValue !== undefined) {
       if (
         typeof field.defaultValue === "object" &&
         field.defaultValue.kind === "FunctionCall"
       ) {
-        const func = field.defaultValue.name;
-        colDef += this.handleDefaultFunction(func);
+        col += this.handleDefaultFunction(field.defaultValue.name);
       } else {
         const val =
           typeof field.defaultValue === "string"
             ? `'${field.defaultValue}'`
             : field.defaultValue;
-        colDef += ` DEFAULT ${val}`;
+        col += ` DEFAULT ${val}`;
       }
     }
 
-    if (
-      field.isRequired ||
-      (field.isPrimaryKey && !colDef.includes("SERIAL"))
-    ) {
-      colDef += " NOT NULL";
+    if (field.isRequired || (field.isPrimaryKey && !col.includes("SERIAL"))) {
+      col += " NOT NULL";
     }
 
-    return colDef;
+    return col;
   }
 
   private handleDefaultFunction(func: string): string {
@@ -250,17 +329,11 @@ export class SqlGenerator {
   }
 
   private mapFieldTypeToSql(fieldType: string): string | undefined {
-    const typeMapping = TYPE_MAPPINGS[fieldType];
-    if (typeMapping) {
-      return typeMapping[this.dialect] || typeMapping["generic"];
-    }
-    return undefined;
+    const mapping = TYPE_MAPPINGS[fieldType];
+    return mapping ? mapping[this.dialect] || mapping.generic : undefined;
   }
 
-  private isRealColumn(field: ModelNode["fields"][0]): boolean {
-    return (
-      TYPE_MAPPINGS[field.fieldType] !== undefined &&
-      (!field.relation || field.relation.foreignKey !== undefined)
-    );
+  private isRealColumn(field: FieldNode): boolean {
+    return TYPE_MAPPINGS[field.fieldType] !== undefined;
   }
 }

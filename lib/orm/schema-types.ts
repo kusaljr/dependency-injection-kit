@@ -3,7 +3,7 @@
 export type users = {
   id? : number;
   name : string;
-  email? : string;
+  email : string;
   products? : product[];
 };
 
