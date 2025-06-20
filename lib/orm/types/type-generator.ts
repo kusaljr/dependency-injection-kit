@@ -1,18 +1,6 @@
-type AST = {
-  kind: "Schema";
-  models: {
-    kind: "Model";
-    name: string;
-    fields: {
-      kind: "Field";
-      name: string;
-      fieldType: "int" | "string" | string; // string for model ref
-      isArray?: boolean;
-    }[];
-  }[];
-};
+import { SchemaNode } from "../core/ast";
 
-export function generateTypeCode(ast: AST): string {
+export function generateTypeCode(ast: SchemaNode): string {
   const modelNames = ast.models.map((m) => `"${m.name}"`).join(" | ");
 
   const modelTypes = ast.models
@@ -20,7 +8,7 @@ export function generateTypeCode(ast: AST): string {
       const fields = model.fields
         .map((field) => {
           const tsType = mapFieldType(field);
-          return `  ${field.name}: ${tsType};`;
+          return `  ${field.name}${field.isRequired ? "" : "?"} : ${tsType};`;
         })
         .join("\n");
       return `export type ${model.name} = {\n${fields}\n};`;
@@ -41,7 +29,7 @@ ${modelsMapping}
 `.trim();
 }
 
-function mapFieldType(field: AST["models"][0]["fields"][0]): string {
+function mapFieldType(field: SchemaNode["models"][0]["fields"][0]): string {
   if (field.fieldType === "int" || field.fieldType === "float") return "number";
   if (
     field.fieldType === "string" ||

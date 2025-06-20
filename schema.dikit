@@ -1,6 +1,6 @@
 model users {
   id int @primary_key @default(autoincrement())
-  name string @unique
+  name string @unique @required
   email string @unique
   products product[] @one_to_many
 }

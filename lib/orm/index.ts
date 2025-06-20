@@ -5,6 +5,7 @@ import { SchemaNode } from "./core/ast";
 import { Lexer, Token } from "./core/lexer";
 import { Parser } from "./core/parser";
 import { SemanticAnalyzer, SemanticError } from "./core/semantic-analyzer";
+import { migrate } from "./migrator/migrate";
 import { DB } from "./query-builder/query-builder";
 import { generateTypeCode } from "./types/type-generator";
 
@@ -59,14 +60,14 @@ console.log("\n--- Schema Successfully Validated! ---");
 //   });
 // });
 
-// migrate(ast)
-//   .then(() => {
-//     console.log("\n✅ Migration completed successfully.");
-//   })
-//   .catch((err) => {
-//     console.error("\n❌ Migration failed:", err);
-//     process.exit(1);
-//   });
+migrate(ast)
+  .then(() => {
+    console.log("\n✅ Migration completed successfully.");
+  })
+  .catch((err) => {
+    console.error("\n❌ Migration failed:", err);
+    process.exit(1);
+  });
 
 const typeCode = generateTypeCode(ast);
 
@@ -83,8 +84,16 @@ const sqlClient = new SQL({
 
 async function main(ast: SchemaNode) {
   const db = new DB(ast, sqlClient);
-  const result = await db.table("users").select(["users.email"]).execute();
-  console.log("Query Result:", result[0].email);
+  const result = await db
+    .table("users")
+    .update({
+      name: "John Doe",
+    })
+    .where({
+      "users.id": 1,
+    })
+    .execute();
+  console.log("Query Result:", result);
 }
 
 main(ast);

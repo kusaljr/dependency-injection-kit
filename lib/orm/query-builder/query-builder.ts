@@ -561,7 +561,9 @@ class Table<M extends Models, T extends keyof M> {
     );
   }
 
-  public async insert(values: InsertValues<M, T> | InsertValues<M, T>[]) {
+  public async insert<V extends InsertValues<M, T> | InsertValues<M, T>[]>(
+    values: V
+  ): Promise<V extends InsertValues<M, T>[] ? M[T][] : M[T]> {
     const isArray = Array.isArray(values);
     const rows = isArray ? values : [values];
 
