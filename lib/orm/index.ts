@@ -83,11 +83,19 @@ const sqlClient = new SQL({
 
 async function main(ast: SchemaNode) {
   const db = new DB(ast, sqlClient);
-  const result = await db
-    .table("users")
-    .select(["users.id", "users.name", "users.email"])
-    .limit(1)
-    .execute();
+  const result = await db.transaction(async (tx) => {
+    const user = await tx.table("users").insert({
+      name: "Prajwal",
+      email: "prajwal@test.com",
+    });
+    const product = await tx.table("product").insert({
+      name: "Product 2 Prajwal",
+      price: 200,
+      user_id: user.id,
+    });
+
+    return product;
+  });
 
   console.log(result);
 }

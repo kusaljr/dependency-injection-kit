@@ -1,4 +1,4 @@
-import { sql } from "bun";
+import { sql, SQL } from "bun";
 import { SchemaNode } from "../core/ast";
 import { Models } from "../types/schema-types";
 
@@ -86,7 +86,7 @@ class Query<
 
   constructor(
     private tableName: T,
-    private sqlClient: typeof sql,
+    private sqlClient: SQL, // Use SQLClient type here
     fields: F[] = [],
     conditions: Condition<M, T> = {},
     joins: JoinClause<M>[] = [],
@@ -286,7 +286,7 @@ class Query<
     if (this.updateValues) {
       const { sql: sqlString, params } = this._update(this.updateValues);
       console.log("Executing SQL:", sqlString, params);
-      const res = this.sqlClient.unsafe(sqlString, params);
+      const res = await this.sqlClient.unsafe(sqlString, params); // Use await here
       console.log("Update Result:", res);
       return res;
     }
@@ -294,7 +294,7 @@ class Query<
     if (this.isDeleteOperation) {
       const { sql: sqlString, params } = this._delete();
       console.log("Executing SQL:", sqlString, params);
-      return this.sqlClient.unsafe(sqlString, params);
+      return await this.sqlClient.unsafe(sqlString, params); // Use await here
     }
 
     let paramIndex = 1;
@@ -325,7 +325,7 @@ class Query<
     }
 
     if (this.limitValue !== null) {
-      query += ` LIMIT ${paramIndex++}`;
+      query += ` LIMIT $${paramIndex++}`; // Use placeholder for LIMIT
       queryParams.push(this.limitValue);
     }
 
@@ -341,7 +341,7 @@ class Query<
 }
 
 class Table<M extends Models, T extends keyof M> {
-  constructor(private tableName: T, private sqlClient: typeof sql) {}
+  constructor(private tableName: T, private sqlClient: SQL) {} // Use SQLClient type here
   public select<F extends SelectFieldFrom<M, T>>(
     fields: F[]
   ): Query<M, T, F, T> {
@@ -435,13 +435,13 @@ class Table<M extends Models, T extends keyof M> {
       allPlaceholders.push(`(${rowPlaceholders})`);
     });
 
-    const sql = `INSERT INTO ${String(this.tableName)} (${fields.join(
+    const sqlQuery = `INSERT INTO ${String(this.tableName)} (${fields.join(
       ", "
     )}) VALUES ${allPlaceholders.join(", ")} RETURNING *`;
 
-    console.log("Executing SQL:", sql, "with params:", allParams);
+    console.log("Executing SQL:", sqlQuery, "with params:", allParams);
 
-    const result = await this.sqlClient.unsafe(sql, allParams);
+    const result = await this.sqlClient.unsafe(sqlQuery, allParams);
     return isArray ? result : result[0];
   }
   public async upsert(options: {
@@ -471,16 +471,16 @@ class Table<M extends Models, T extends keyof M> {
       .map((f) => `${f} = EXCLUDED.${f}`)
       .join(", ");
 
-    const sql = `INSERT INTO ${String(this.tableName)} (${insertFields.join(
-      ", "
-    )}) VALUES (${insertPlaceholders})
+    const sqlQuery = `INSERT INTO ${String(
+      this.tableName
+    )} (${insertFields.join(", ")}) VALUES (${insertPlaceholders})
 ON CONFLICT (${conflictFields.join(", ")})
 DO UPDATE SET ${updateAssignments}
 RETURNING *`;
 
-    console.log("Executing SQL:", sql, "with params:", insertValues);
+    console.log("Executing SQL:", sqlQuery, "with params:", insertValues);
 
-    const [res] = await this.sqlClient.unsafe(sql, insertValues);
+    const [res] = await this.sqlClient.unsafe(sqlQuery, insertValues);
     return res;
   }
 
@@ -528,5 +528,15 @@ export class DB<M extends Models> {
       );
     }
     return new Table<M, T>(tableName, this.sqlClient);
+  }
+
+  public async transaction(
+    callback: (txDB: DB<M>) => Promise<void>
+  ): Promise<void> {
+    return await this.sqlClient.begin(async (tx) => {
+      // Create a new DB instance that uses the transaction object
+      const txDB = new DB<M>(this.ast, tx as any); // Type assertion needed here due to Bun's `tx` type
+      return await callback(txDB);
+    });
   }
 }

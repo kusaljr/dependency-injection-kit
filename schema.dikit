@@ -6,7 +6,7 @@ model users {
 }
 
 model product {
-  id int @primary_key
+  id int @primary_key @default(autoincrement())
   name string @required
   price float @default(0.0)
   user_id int
