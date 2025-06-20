@@ -1,4 +1,4 @@
-import { ModelNode, SchemaNode } from "../ast";
+import { ModelNode, SchemaNode } from "../core/ast";
 
 export type DbDialect = "postgresql" | "mysql" | "sqlite" | "generic";
 

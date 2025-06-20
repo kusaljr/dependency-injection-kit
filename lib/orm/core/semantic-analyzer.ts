@@ -1,4 +1,4 @@
-import { FieldNode, ModelNode, SchemaNode } from "./ast";
+import { FieldNode, ModelNode, SchemaNode } from "./core/ast";
 
 export class SemanticError extends Error {
   constructor(message: string, public line: number, public column: number) {

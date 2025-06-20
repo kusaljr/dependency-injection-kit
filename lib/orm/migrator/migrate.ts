@@ -1,5 +1,5 @@
 import { SQL } from "bun";
-import { SchemaNode } from "../ast";
+import { SchemaNode } from "../core/ast";
 import { fetchSchemaAstFromDb } from "./introspection";
 import { SqlGenerator } from "./migration-generator";
 

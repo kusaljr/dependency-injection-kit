@@ -1,5 +1,5 @@
 import { SQL } from "bun";
-import { FieldNode, ModelNode, RelationEnum, SchemaNode } from "../ast";
+import { FieldNode, ModelNode, RelationEnum, SchemaNode } from "../core/ast";
 export async function fetchSchemaAstFromDb(sql: SQL): Promise<SchemaNode> {
   // Fetch columns
   const columns = await sql`

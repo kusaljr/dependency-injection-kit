@@ -1,17 +1,10 @@
-import { SchemaNode } from "./ast";
-import { Models } from "./schema-types";
+import { sql } from "bun";
+import { SchemaNode } from "../core/ast";
+import { Models } from "../types/schema-types";
 
-type QualifiedInsertValues<M extends Models, T extends keyof M> = {
-  [K in keyof M[T] as `${T & string}.${K & string}`]?: M[T][K];
-};
+type InsertValues<M extends Models, T extends keyof M> = Partial<M[T]>;
 
-type InsertValues<M extends Models, T extends keyof M> = Partial<
-  QualifiedInsertValues<M, T>
->;
-
-type UpdateValues<M extends Models, T extends keyof M> = Partial<{
-  [K in keyof M[T] as `${T & string}.${K & string}`]: M[T][K];
-}>;
+type UpdateValues<M extends Models, T extends keyof M> = Partial<M[T]>;
 
 type ForeignKeyOf<
   M extends Models,
@@ -93,6 +86,7 @@ class Query<
 
   constructor(
     private tableName: T,
+    private sqlClient: typeof sql,
     fields: F[] = [],
     conditions: Condition<M, T> = {},
     joins: JoinClause<M>[] = [],
@@ -120,6 +114,7 @@ class Query<
     }
     return new Query(
       this.tableName,
+      this.sqlClient,
       fields,
       this.conditions as Condition<M, T>,
       this.joins,
@@ -132,6 +127,7 @@ class Query<
   public where(conditions: Condition<M, JT>): Query<M, T, F, JT> {
     return new Query<M, T, F, JT>(
       this.tableName,
+      this.sqlClient,
       this.selectedFields,
       conditions as Condition<M, T>,
       this.joins,
@@ -149,6 +145,7 @@ class Query<
     }
     return new Query(
       this.tableName,
+      this.sqlClient,
       this.selectedFields,
       this.conditions,
       this.joins,
@@ -164,6 +161,7 @@ class Query<
     }
     return new Query(
       this.tableName,
+      this.sqlClient,
       this.selectedFields,
       this.conditions,
       this.joins,
@@ -212,6 +210,7 @@ class Query<
     const newJoinedTables = [...this.joinedTables, target] as (JT | J)[];
     return new Query(
       this.tableName,
+      this.sqlClient,
       this.selectedFields,
       this.conditions,
       newJoins,
@@ -221,13 +220,13 @@ class Query<
     );
   }
 
-  public _update(values: UpdateValues<M, T>): PreparedStatement {
+  private _update(values: UpdateValues<M, T>): PreparedStatement {
     const setClauses: string[] = [];
     const updateParams: any[] = [];
-
+    let index = 1;
     for (const field in values) {
       if (values.hasOwnProperty(field)) {
-        setClauses.push(`${String(field)} = ?`);
+        setClauses.push(`${String(field)} = $${index++}`);
         updateParams.push(values[field]);
       }
     }
@@ -242,13 +241,13 @@ class Query<
 
     for (const field in this.conditions) {
       if (this.conditions.hasOwnProperty(field)) {
-        whereClauses.push(`${String(field)} = ?`);
+        whereClauses.push(`${String(field)} = $${index++}`);
         whereParams.push(this.conditions[field]);
       }
     }
 
     if (whereClauses.length > 0) {
-      sql += ` WHERE ${whereClauses.join(" AND ")}`;
+      sql += ` WHERE ${whereClauses.join(" AND ")} RETURNING *`;
     } else {
       console.warn(
         `WARNING: UPDATE statement for table '${String(
@@ -259,20 +258,20 @@ class Query<
     return { sql, params: [...updateParams, ...whereParams] };
   }
 
-  public _delete(): PreparedStatement {
+  private _delete(): PreparedStatement {
     let sql = `DELETE FROM ${String(this.tableName)}`;
     const whereClauses: string[] = [];
     const whereParams: any[] = [];
-
+    let index = 1;
     for (const field in this.conditions) {
       if (this.conditions.hasOwnProperty(field)) {
-        whereClauses.push(`${String(field)} = ?`);
+        whereClauses.push(`${String(field)} = $${index++}`);
         whereParams.push(this.conditions[field]);
       }
     }
 
     if (whereClauses.length > 0) {
-      sql += ` WHERE ${whereClauses.join(" AND ")}`;
+      sql += ` WHERE ${whereClauses.join(" AND ")} RETURNING *`;
     } else {
       console.warn(
         `WARNING: DELETE statement for table '${String(
@@ -283,19 +282,29 @@ class Query<
     return { sql, params: whereParams };
   }
 
-  public build(): PreparedStatement {
+  public async execute(): Promise<M[T][keyof M[T]][]> {
     if (this.updateValues) {
-      return this._update(this.updateValues);
-    }
-    if (this.isDeleteOperation) {
-      return this._delete();
+      const { sql: sqlString, params } = this._update(this.updateValues);
+      console.log("Executing SQL:", sqlString, params);
+      const res = this.sqlClient.unsafe(sqlString, params);
+      console.log("Update Result:", res);
+      return res;
     }
 
+    if (this.isDeleteOperation) {
+      const { sql: sqlString, params } = this._delete();
+      console.log("Executing SQL:", sqlString, params);
+      return this.sqlClient.unsafe(sqlString, params);
+    }
+
+    let paramIndex = 1;
+
+    // SELECT query
     const fieldsStr =
       this.selectedFields.length > 0 ? this.selectedFields.join(", ") : "*";
 
     let query = `SELECT ${fieldsStr} FROM ${String(this.tableName)}`;
-    const queryParams: any[] = []; // Initialize an array for query parameters
+    const queryParams: any[] = [];
 
     this.joins.forEach((join) => {
       query += ` ${join.type.toUpperCase()} JOIN ${String(join.target)} ON ${
@@ -304,11 +313,10 @@ class Query<
     });
 
     const whereClauses: string[] = [];
-    // Iterate through conditions to build prepared statement WHERE clause
     for (const field in this.conditions) {
       if (this.conditions.hasOwnProperty(field)) {
-        whereClauses.push(`${String(field)} = ?`); // Use placeholder
-        queryParams.push(this.conditions[field]); // Add value to params
+        whereClauses.push(`${String(field)} = $${paramIndex++}`);
+        queryParams.push(this.conditions[field]);
       }
     }
 
@@ -317,32 +325,38 @@ class Query<
     }
 
     if (this.limitValue !== null) {
-      query += ` LIMIT ?`;
-      queryParams.push(this.limitValue); // Add limit value to params
+      query += ` LIMIT ${paramIndex++}`;
+      queryParams.push(this.limitValue);
     }
 
     if (this.offsetValue !== null) {
-      query += ` OFFSET ?`;
-      queryParams.push(this.offsetValue); // Add offset value to params
+      query += ` OFFSET $${paramIndex++}`;
+      queryParams.push(this.offsetValue);
     }
 
-    return { sql: query, params: queryParams }; // Return query and its parameters
+    console.log("Executing SQL:", query, "with params:", queryParams);
+
+    return await this.sqlClient.unsafe(query, queryParams);
   }
 }
 
 class Table<M extends Models, T extends keyof M> {
-  constructor(private tableName: T) {}
-
+  constructor(private tableName: T, private sqlClient: typeof sql) {}
   public select<F extends SelectFieldFrom<M, T>>(
     fields: F[]
   ): Query<M, T, F, T> {
-    return new Query(this.tableName, fields);
+    return new Query(this.tableName, this.sqlClient, fields);
   }
 
   public where(
     conditions: Condition<M, T>
   ): Query<M, T, SelectFieldFrom<M, T>, T> {
-    return new Query(this.tableName, [], conditions as Condition<M, T>);
+    return new Query(
+      this.tableName,
+      this.sqlClient,
+      [],
+      conditions as Condition<M, T>
+    );
   }
 
   public innerJoin<J extends CompatibleJoins<M, T>>(
@@ -351,6 +365,7 @@ class Table<M extends Models, T extends keyof M> {
   ): Query<M, T, SelectFieldFrom<M, T | J>, T | J> {
     return new Query(
       this.tableName,
+      this.sqlClient,
       [],
       {},
       [{ target, type: "inner", on }],
@@ -366,6 +381,7 @@ class Table<M extends Models, T extends keyof M> {
   ): Query<M, T, SelectFieldFrom<M, T | J>, T | J> {
     return new Query(
       this.tableName,
+      this.sqlClient,
       [],
       {},
       [{ target, type: "left", on }],
@@ -381,6 +397,7 @@ class Table<M extends Models, T extends keyof M> {
   ): Query<M, T, SelectFieldFrom<M, T | J>, T | J> {
     return new Query(
       this.tableName,
+      this.sqlClient,
       [],
       {},
       [{ target, type: "right", on }],
@@ -390,19 +407,81 @@ class Table<M extends Models, T extends keyof M> {
     );
   }
 
-  public insert(values: InsertValues<M, T>): PreparedStatement {
-    const fields = Object.keys(values);
-    const placeholders = fields.map(() => "?").join(", ");
-    const params = Object.values(values);
+  public async insert(values: InsertValues<M, T> | InsertValues<M, T>[]) {
+    const isArray = Array.isArray(values);
+    const rows = isArray ? values : [values];
 
-    if (fields.length === 0) {
+    if (rows.length === 0) {
       throw new Error("No values provided for insertion.");
     }
 
+    const fields = Object.keys(rows[0]);
+    if (fields.length === 0) {
+      throw new Error("Insert object must have at least one field.");
+    }
+
+    const allParams: any[] = [];
+
+    const allPlaceholders: string[] = [];
+
+    rows.forEach((row, rowIndex) => {
+      const rowParams = fields.map((f) => (row as Record<string, any>)[f]);
+      allParams.push(...rowParams);
+
+      const offset = rowIndex * fields.length;
+      const rowPlaceholders = fields
+        .map((_, i) => `$${offset + i + 1}`)
+        .join(", ");
+      allPlaceholders.push(`(${rowPlaceholders})`);
+    });
+
     const sql = `INSERT INTO ${String(this.tableName)} (${fields.join(
       ", "
-    )}) VALUES (${placeholders})`;
-    return { sql, params };
+    )}) VALUES ${allPlaceholders.join(", ")} RETURNING *`;
+
+    console.log("Executing SQL:", sql, "with params:", allParams);
+
+    const result = await this.sqlClient.unsafe(sql, allParams);
+    return isArray ? result : result[0];
+  }
+  public async upsert(options: {
+    create: InsertValues<M, T>;
+    update?: InsertValues<M, T>;
+    on: Partial<M[T]>;
+  }) {
+    const { create, update, on } = options;
+
+    const insertData = update ? { ...create, ...update } : create;
+
+    const insertFields = Object.keys(insertData);
+    const insertPlaceholders = insertFields
+      .map((_, i) => `$${i + 1}`)
+      .join(", ");
+    const insertValues = insertFields.map(
+      (f) => insertData[f as keyof typeof insertData]
+    );
+
+    const conflictFields = Object.keys(on);
+    if (conflictFields.length === 0) {
+      throw new Error("Conflict target cannot be empty.");
+    }
+
+    const updateFields = update ? Object.keys(update) : insertFields;
+    const updateAssignments = updateFields
+      .map((f) => `${f} = EXCLUDED.${f}`)
+      .join(", ");
+
+    const sql = `INSERT INTO ${String(this.tableName)} (${insertFields.join(
+      ", "
+    )}) VALUES (${insertPlaceholders})
+ON CONFLICT (${conflictFields.join(", ")})
+DO UPDATE SET ${updateAssignments}
+RETURNING *`;
+
+    console.log("Executing SQL:", sql, "with params:", insertValues);
+
+    const [res] = await this.sqlClient.unsafe(sql, insertValues);
+    return res;
   }
 
   public update(
@@ -410,6 +489,7 @@ class Table<M extends Models, T extends keyof M> {
   ): Query<M, T, SelectFieldFrom<M, T>, T> {
     return new Query(
       this.tableName,
+      this.sqlClient,
       [],
       {},
       [],
@@ -424,6 +504,7 @@ class Table<M extends Models, T extends keyof M> {
   public delete(): Query<M, T, SelectFieldFrom<M, T>, T> {
     return new Query(
       this.tableName,
+      this.sqlClient,
       [],
       {},
       [],
@@ -437,7 +518,7 @@ class Table<M extends Models, T extends keyof M> {
 }
 
 export class DB<M extends Models> {
-  constructor(private ast: SchemaNode) {}
+  constructor(private ast: SchemaNode, private sqlClient: typeof sql) {}
 
   public table<T extends keyof M>(tableName: T): Table<M, T> {
     const modelExists = this.ast.models.some((m) => m.name === tableName);
@@ -446,6 +527,6 @@ export class DB<M extends Models> {
         `Table '${String(tableName)}' does not exist in the schema.`
       );
     }
-    return new Table<M, T>(tableName);
+    return new Table<M, T>(tableName, this.sqlClient);
   }
 }
