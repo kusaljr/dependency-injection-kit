@@ -1,4 +1,4 @@
-import { sql, SQL } from "bun";
+import { SQL } from "bun";
 import { SchemaNode } from "../core/ast";
 import { Models } from "../types/schema-types";
 
@@ -658,7 +658,7 @@ RETURNING *`;
 export class DB<M extends Models> {
   private modelsDef: Models; // Add modelsDef to DB class
 
-  constructor(private ast: SchemaNode, private sqlClient: typeof sql) {
+  constructor(private ast: SchemaNode, private sqlClient: SQL) {
     // Populate modelsDef from ast.models
     this.modelsDef = {} as M;
     this.ast.models.forEach((model) => {

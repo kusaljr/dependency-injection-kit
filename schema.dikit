@@ -5,12 +5,15 @@ model users {
   products product[] @one_to_many
 }
 
+
+
 model product {
   id int @primary_key @default(autoincrement())
   name string @required
   price float @default(0.0)
   user_id int
   user users @many_to_one(user_id)
+  
 
   @@unique([name, user_id]) 
 }
