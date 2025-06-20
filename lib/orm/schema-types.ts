@@ -1,8 +1,9 @@
 // AUTO-GENERATED FILE. DO NOT EDIT.
 
-export type user = {
+export type users = {
   id: number;
   name: string;
+  email: string;
   products: product[];
 };
 
@@ -11,7 +12,7 @@ export type product = {
   name: string;
   price: number;
   user_id: number;
-  user: user;
+  user: users;
 };
 
 export type barcode = {
@@ -22,10 +23,10 @@ export type barcode = {
   updated_at: string;
 };
 
-export type ModelNames = "user" | "product" | "barcode";
+export type ModelNames = "users" | "product" | "barcode";
 
 export type Models = {
-  user: user;
+  users: users;
   product: product;
   barcode: barcode;
 };

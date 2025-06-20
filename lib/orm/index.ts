@@ -1,10 +1,9 @@
 import * as fs from "fs";
 import path from "path";
 import { Lexer, Token } from "./lexer";
+import { migrate } from "./migrator/migrate";
 import { Parser } from "./parser";
-import { DB } from "./query-builder";
 import { SemanticAnalyzer, SemanticError } from "./semantic-analyzer";
-import { SqlGenerator } from "./sql-generator";
 import { generateTypeCode } from "./type-generator";
 
 const schemaFilePath = "schema.dikit";
@@ -49,7 +48,7 @@ if (semanticErrors.length > 0) {
 
 console.log("\n--- Schema Successfully Validated! ---");
 // console.log("AST (Simplified View):");
-console.log(JSON.stringify(ast, null, 2));
+// console.log(JSON.stringify(ast, null, 2));
 
 ast.models.forEach((model) => {
   console.log(`  Model: ${model.name}`);
@@ -58,18 +57,14 @@ ast.models.forEach((model) => {
   });
 });
 
-const sqlGenerator = new SqlGenerator(ast, "postgresql");
-const sqlStatements: string[] = sqlGenerator.generate();
-
-if (sqlStatements.length > 0) {
-  console.log("\n--- Generated SQL DDL Statements ---");
-  sqlStatements.forEach((stmt) => {
-    console.log(stmt);
-    console.log("\n---");
+migrate(ast)
+  .then(() => {
+    console.log("\n✅ Migration completed successfully.");
+  })
+  .catch((err) => {
+    console.error("\n❌ Migration failed:", err);
+    process.exit(1);
   });
-} else {
-  console.log("No SQL statements generated.");
-}
 
 const typeCode = generateTypeCode(ast);
 
@@ -80,10 +75,4 @@ fs.writeFileSync(outPath, typeCode, { encoding: "utf8" });
 
 console.log(`✅ Type definitions written to ${outPath}`);
 
-const db = new DB(ast);
-
-const query = db.table("user").update({
-  "user.id": 1,
-});
-
-console.log(query);
+// const db = new DB(ast);

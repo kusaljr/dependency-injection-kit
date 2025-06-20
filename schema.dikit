@@ -1,6 +1,7 @@
-model user {
+model users {
   id int @primary_key @default(autoincrement())
   name string @unique
+  email string @unique
   products product[] @one_to_many
 }
 
@@ -9,7 +10,7 @@ model product {
   name string @required
   price float @default(0.0)
   user_id int
-  user user @many_to_one(user_id)
+  user users @many_to_one(user_id)
 
   @@unique([name, user_id]) 
 }
