@@ -12,7 +12,7 @@ type ForeignKeyOf<
   Target extends keyof M
 > = {
   [K in keyof M[Source]]: K extends `${infer Related}_id`
-    ? Related extends Target
+    ? Target extends `${Related}` | `${Related}s`
       ? K
       : never
     : never;
@@ -52,7 +52,9 @@ type Condition<M extends Models, JT extends keyof M> = Partial<
 
 type SelectFieldFrom<M extends Models, Tables extends keyof M> = {
   [T in Tables]: {
-    [K in keyof M[T]]: `${T & string}.${K & string}`;
+    [K in keyof M[T]]: M[T][K] extends object
+      ? never // Exclude relations (objects/arrays)
+      : `${T & string}.${K & string}`;
   }[keyof M[T]];
 }[Tables];
 
@@ -83,6 +85,7 @@ class Query<
   private joinedTables: JT[];
   private updateValues: UpdateValues<M, T> | null = null;
   private isDeleteOperation: boolean = false;
+  private modelsDef: Models; // Added modelsDef property
 
   constructor(
     private tableName: T,
@@ -94,7 +97,8 @@ class Query<
     offset: number | null = null,
     joinedTables: JT[] = [tableName as unknown as JT],
     updateValues: UpdateValues<M, T> | null = null,
-    isDeleteOperation: boolean = false
+    isDeleteOperation: boolean = false,
+    modelsDef: Models // Added modelsDef to constructor
   ) {
     this.selectedFields = fields;
     this.conditions = conditions;
@@ -104,6 +108,7 @@ class Query<
     this.joinedTables = joinedTables;
     this.updateValues = updateValues;
     this.isDeleteOperation = isDeleteOperation;
+    this.modelsDef = modelsDef; // Initialized modelsDef
   }
 
   public select<N extends SelectFieldFrom<M, JT>>(
@@ -120,7 +125,10 @@ class Query<
       this.joins,
       this.limitValue,
       this.offsetValue,
-      this.joinedTables
+      this.joinedTables,
+      null,
+      false,
+      this.modelsDef // Pass modelsDef
     );
   }
 
@@ -135,7 +143,8 @@ class Query<
       this.offsetValue,
       this.joinedTables,
       this.updateValues,
-      this.isDeleteOperation
+      this.isDeleteOperation,
+      this.modelsDef // Pass modelsDef
     );
   }
 
@@ -151,7 +160,10 @@ class Query<
       this.joins,
       n,
       this.offsetValue,
-      this.joinedTables
+      this.joinedTables,
+      null,
+      false,
+      this.modelsDef // Pass modelsDef
     );
   }
 
@@ -167,7 +179,10 @@ class Query<
       this.joins,
       this.limitValue,
       n,
-      this.joinedTables
+      this.joinedTables,
+      null,
+      false,
+      this.modelsDef // Pass modelsDef
     );
   }
 
@@ -216,7 +231,10 @@ class Query<
       newJoins,
       this.limitValue,
       this.offsetValue,
-      newJoinedTables
+      newJoinedTables,
+      null,
+      false,
+      this.modelsDef // Pass modelsDef
     );
   }
 
@@ -282,6 +300,79 @@ class Query<
     return { sql, params: whereParams };
   }
 
+  private buildJsonAggSQL(): { query: string; params: any[] } {
+    const mainTable = String(this.tableName);
+    const mainTableDef = this.modelsDef[mainTable as keyof Models];
+
+    if (!mainTableDef) {
+      throw new Error(`Schema definition not found for table: ${mainTable}`);
+    }
+
+    const join = this.joins[0]; // assume 1 join for now
+    if (!join) {
+      throw new Error("json_agg requires at least one join");
+    }
+
+    const joinTable = String(join.target);
+    const joinTableDef = this.modelsDef[joinTable as keyof Models];
+    if (!joinTableDef) {
+      throw new Error(
+        `Schema definition not found for joined table: ${joinTable}`
+      );
+    }
+
+    // Use select fields provided
+    const mainFieldsArr = this.selectedFields
+      .filter((f) => f.startsWith(`${mainTable}.`))
+      .map((f) => f);
+
+    const joinFieldsArr = this.selectedFields
+      .filter((f) => f.startsWith(`${joinTable}.`))
+      .map((f) => {
+        const fieldName = f.split(".")[1];
+        return `'${fieldName}', ${f}`;
+      });
+
+    if (mainFieldsArr.length === 0) {
+      throw new Error(`No select fields provided for main table: ${mainTable}`);
+    }
+
+    if (joinFieldsArr.length === 0) {
+      throw new Error(`No select fields provided for join table: ${joinTable}`);
+    }
+
+    const mainFields = mainFieldsArr.join(", ");
+    const joinFields = joinFieldsArr.join(", ");
+
+    // WHERE clause
+    const whereClauses: string[] = [];
+    const params: any[] = [];
+    let idx = 1;
+    for (const [k, v] of Object.entries(this.conditions)) {
+      whereClauses.push(`${k} = $${idx++}`);
+      params.push(v);
+    }
+
+    // Build query
+    let query = `
+    SELECT 
+      ${mainFields},
+      json_agg(
+        json_build_object(${joinFields})
+      ) AS ${joinTable}s
+    FROM ${mainTable}
+    ${join.type.toUpperCase()} JOIN ${joinTable} ON ${join.on}
+  `;
+
+    if (whereClauses.length > 0) {
+      query += ` WHERE ${whereClauses.join(" AND ")} `;
+    }
+
+    query += ` GROUP BY ${mainFields} `;
+
+    return { query, params };
+  }
+
   public async execute(): Promise<M[T][keyof M[T]][]> {
     if (this.updateValues) {
       const { sql: sqlString, params } = this._update(this.updateValues);
@@ -297,11 +388,23 @@ class Query<
       return await this.sqlClient.unsafe(sqlString, params); // Use await here
     }
 
+    // Determine if it's a json_agg query
+    const isJsonAggQuery = this.joins.length > 0;
+
+    if (isJsonAggQuery) {
+      console.log("Detected JSON_AGG query with joins and no selected fields.");
+      const { query, params } = this.buildJsonAggSQL();
+      console.log("Executing JSON_AGG SQL:", query, "with params:", params);
+      return this.sqlClient.unsafe(query, params);
+    }
+
     let paramIndex = 1;
 
-    // SELECT query
+    // SELECT query (regular select)
     const fieldsStr =
-      this.selectedFields.length > 0 ? this.selectedFields.join(", ") : "*";
+      this.selectedFields.length > 0
+        ? this.selectedFields.join(", ")
+        : `${String(this.tableName)}.*`;
 
     let query = `SELECT ${fieldsStr} FROM ${String(this.tableName)}`;
     const queryParams: any[] = [];
@@ -313,10 +416,11 @@ class Query<
     });
 
     const whereClauses: string[] = [];
-    for (const field in this.conditions) {
-      if (this.conditions.hasOwnProperty(field)) {
-        whereClauses.push(`${String(field)} = $${paramIndex++}`);
-        queryParams.push(this.conditions[field]);
+    // Conditions can refer to fields from any joined table, so we iterate through all joinedTables
+    for (const conditionKey in this.conditions) {
+      if (this.conditions.hasOwnProperty(conditionKey)) {
+        whereClauses.push(`${conditionKey} = $${paramIndex++}`);
+        queryParams.push((this.conditions as any)[conditionKey]);
       }
     }
 
@@ -336,16 +440,32 @@ class Query<
 
     console.log("Executing SQL:", query, "with params:", queryParams);
 
-    return await this.sqlClient.unsafe(query, queryParams);
+    return this.sqlClient.unsafe(query, queryParams);
   }
 }
 
 class Table<M extends Models, T extends keyof M> {
-  constructor(private tableName: T, private sqlClient: SQL) {} // Use SQLClient type here
+  constructor(
+    private tableName: T,
+    private sqlClient: SQL,
+    private modelsDef: Models
+  ) {} // Use SQLClient type here
   public select<F extends SelectFieldFrom<M, T>>(
     fields: F[]
   ): Query<M, T, F, T> {
-    return new Query(this.tableName, this.sqlClient, fields);
+    return new Query(
+      this.tableName,
+      this.sqlClient,
+      fields,
+      {},
+      [],
+      null,
+      null,
+      [this.tableName as unknown as T],
+      null,
+      false,
+      this.modelsDef
+    );
   }
 
   public where(
@@ -355,7 +475,14 @@ class Table<M extends Models, T extends keyof M> {
       this.tableName,
       this.sqlClient,
       [],
-      conditions as Condition<M, T>
+      conditions as Condition<M, T>,
+      [],
+      null,
+      null,
+      [this.tableName as unknown as T],
+      null,
+      false,
+      this.modelsDef // Pass modelsDef
     );
   }
 
@@ -371,7 +498,10 @@ class Table<M extends Models, T extends keyof M> {
       [{ target, type: "inner", on }],
       null,
       null,
-      [this.tableName, target]
+      [this.tableName, target],
+      null,
+      false,
+      this.modelsDef // Pass modelsDef
     );
   }
 
@@ -387,7 +517,10 @@ class Table<M extends Models, T extends keyof M> {
       [{ target, type: "left", on }],
       null,
       null,
-      [this.tableName, target]
+      [this.tableName, target],
+      null,
+      false,
+      this.modelsDef // Pass modelsDef
     );
   }
 
@@ -403,7 +536,10 @@ class Table<M extends Models, T extends keyof M> {
       [{ target, type: "right", on }],
       null,
       null,
-      [this.tableName, target]
+      [this.tableName, target],
+      null,
+      false,
+      this.modelsDef // Pass modelsDef
     );
   }
 
@@ -497,7 +633,8 @@ RETURNING *`;
       null,
       [this.tableName as unknown as T],
       values,
-      false
+      false,
+      this.modelsDef // Pass modelsDef
     );
   }
 
@@ -512,13 +649,30 @@ RETURNING *`;
       null,
       [this.tableName as unknown as T],
       null,
-      true
+      true,
+      this.modelsDef // Pass modelsDef
     );
   }
 }
 
 export class DB<M extends Models> {
-  constructor(private ast: SchemaNode, private sqlClient: typeof sql) {}
+  private modelsDef: Models; // Add modelsDef to DB class
+
+  constructor(private ast: SchemaNode, private sqlClient: typeof sql) {
+    // Populate modelsDef from ast.models
+    this.modelsDef = {} as M;
+    this.ast.models.forEach((model) => {
+      // Assuming model.name is the table name and model.fields define its structure
+      // You might need to adjust this based on the exact structure of SchemaNode and its models
+      (this.modelsDef as any)[model.name] = model.fields.reduce(
+        (acc: any, field: any) => {
+          acc[field.name] = field.type; // Store field name and type (or whatever defines it as non-object)
+          return acc;
+        },
+        {}
+      );
+    });
+  }
 
   public table<T extends keyof M>(tableName: T): Table<M, T> {
     const modelExists = this.ast.models.some((m) => m.name === tableName);
@@ -527,7 +681,7 @@ export class DB<M extends Models> {
         `Table '${String(tableName)}' does not exist in the schema.`
       );
     }
-    return new Table<M, T>(tableName, this.sqlClient);
+    return new Table<M, T>(tableName, this.sqlClient, this.modelsDef); // Pass modelsDef to Table
   }
 
   public async transaction(
