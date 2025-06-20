@@ -1,8 +1,17 @@
 import { SchemaNode } from "./ast";
 import { Models } from "./schema-types";
 
-type InsertValues<M extends Models, T extends keyof M> = Partial<M[T]>;
-type UpdateValues<M extends Models, T extends keyof M> = Partial<M[T]>;
+type QualifiedInsertValues<M extends Models, T extends keyof M> = {
+  [K in keyof M[T] as `${T & string}.${K & string}`]?: M[T][K];
+};
+
+type InsertValues<M extends Models, T extends keyof M> = Partial<
+  QualifiedInsertValues<M, T>
+>;
+
+type UpdateValues<M extends Models, T extends keyof M> = Partial<{
+  [K in keyof M[T] as `${T & string}.${K & string}`]: M[T][K];
+}>;
 
 type ForeignKeyOf<
   M extends Models,
@@ -40,8 +49,13 @@ type StrictJoinOn<M extends Models, T extends keyof M, J extends keyof M> =
       ? `${J & string}.${ForeignKeyOf<M, J, T> & string} = ${T & string}.id`
       : never);
 
-type Condition<M extends Models, T extends keyof M> = Partial<M[T]>;
-
+type Condition<M extends Models, JT extends keyof M> = Partial<
+  {
+    [T in JT]: {
+      [K in keyof M[T] as `${T & string}.${K & string}`]: M[T][K];
+    };
+  }[JT]
+>;
 type SelectFieldFrom<M extends Models, Tables extends keyof M> = {
   [T in Tables]: {
     [K in keyof M[T]]: `${T & string}.${K & string}`;

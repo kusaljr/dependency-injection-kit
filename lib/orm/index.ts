@@ -82,12 +82,8 @@ console.log(`✅ Type definitions written to ${outPath}`);
 
 const db = new DB(ast);
 
-const query = db
-  .table("user")
-  .innerJoin("product", "product.user_id = user.id")
-  .select(["user.id", "user.name", "product.name", "product.price"])
-  .limit(10)
-  .offset(0)
-  .build();
+const query = db.table("user").update({
+  "user.id": 1,
+});
 
 console.log(query);
