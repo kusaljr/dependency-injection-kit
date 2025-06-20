@@ -6,6 +6,24 @@ type InsertValues<M extends Models, T extends keyof M> = Partial<M[T]>;
 
 type UpdateValues<M extends Models, T extends keyof M> = Partial<M[T]>;
 
+type ExecuteResult<
+  M extends Models,
+  T extends keyof M,
+  F extends string
+> = F extends never
+  ? M[T][]
+  : Array<{
+      [K in F as K extends `${string}.${infer Col}`
+        ? Col
+        : never]: K extends `${infer Table}.${infer Col}`
+        ? Table extends keyof M
+          ? Col extends keyof M[Table]
+            ? M[Table][Col]
+            : never
+          : never
+        : never;
+    }>;
+
 type ForeignKeyOf<
   M extends Models,
   Source extends keyof M,
@@ -373,7 +391,7 @@ class Query<
     return { query, params };
   }
 
-  public async execute(): Promise<M[T][keyof M[T]][]> {
+  public async execute(): Promise<ExecuteResult<M, T, F>> {
     if (this.updateValues) {
       const { sql: sqlString, params } = this._update(this.updateValues);
       console.log("Executing SQL:", sqlString, params);
@@ -684,13 +702,12 @@ export class DB<M extends Models> {
     return new Table<M, T>(tableName, this.sqlClient, this.modelsDef); // Pass modelsDef to Table
   }
 
-  public async transaction(
-    callback: (txDB: DB<M>) => Promise<void>
-  ): Promise<void> {
-    return await this.sqlClient.begin(async (tx) => {
-      // Create a new DB instance that uses the transaction object
-      const txDB = new DB<M>(this.ast, tx as any); // Type assertion needed here due to Bun's `tx` type
-      return await callback(txDB);
+  public async transaction<R>(
+    callback: (txDB: DB<M>) => Promise<R>
+  ): Promise<R> {
+    return this.sqlClient.begin(async (tx) => {
+      const txDB = new DB<M>(this.ast, tx as typeof this.sqlClient);
+      return callback(txDB);
     });
   }
 }

@@ -83,22 +83,8 @@ const sqlClient = new SQL({
 
 async function main(ast: SchemaNode) {
   const db = new DB(ast, sqlClient);
-  const result = await db.transaction(async (tx) => {
-    const user = await tx
-      .table("users")
-      .update({
-        name: "Puti",
-      })
-      .where({
-        "users.id": 6,
-      })
-      .execute();
-
-    console.log("User updated:", user);
-
-    // throw new Error("Simulated error to test transaction rollback");
-  });
-  console.log("Transaction result:", result);
+  const result = await db.table("users").select(["users.email"]).execute();
+  console.log("Query Result:", result[0].email);
 }
 
 main(ast);
