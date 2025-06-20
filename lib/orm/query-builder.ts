@@ -56,6 +56,7 @@ type Condition<M extends Models, JT extends keyof M> = Partial<
     };
   }[JT]
 >;
+
 type SelectFieldFrom<M extends Models, Tables extends keyof M> = {
   [T in Tables]: {
     [K in keyof M[T]]: `${T & string}.${K & string}`;
@@ -120,7 +121,7 @@ class Query<
     return new Query(
       this.tableName,
       fields,
-      this.conditions,
+      this.conditions as Condition<M, T>,
       this.joins,
       this.limitValue,
       this.offsetValue,
@@ -128,11 +129,11 @@ class Query<
     );
   }
 
-  public where(conditions: Condition<M, T>): Query<M, T, F, JT> {
-    return new Query(
+  public where(conditions: Condition<M, JT>): Query<M, T, F, JT> {
+    return new Query<M, T, F, JT>(
       this.tableName,
       this.selectedFields,
-      conditions,
+      conditions as Condition<M, T>,
       this.joins,
       this.limitValue,
       this.offsetValue,
@@ -282,7 +283,7 @@ class Query<
     return { sql, params: whereParams };
   }
 
-  public build(): string | PreparedStatement {
+  public build(): PreparedStatement {
     if (this.updateValues) {
       return this._update(this.updateValues);
     }
@@ -294,6 +295,7 @@ class Query<
       this.selectedFields.length > 0 ? this.selectedFields.join(", ") : "*";
 
     let query = `SELECT ${fieldsStr} FROM ${String(this.tableName)}`;
+    const queryParams: any[] = []; // Initialize an array for query parameters
 
     this.joins.forEach((join) => {
       query += ` ${join.type.toUpperCase()} JOIN ${String(join.target)} ON ${
@@ -301,23 +303,30 @@ class Query<
       }`;
     });
 
-    const whereClauses = Object.entries(this.conditions)
-      .map(([field, value]) => `${String(field)} = ${JSON.stringify(value)}`)
-      .join(" AND ");
+    const whereClauses: string[] = [];
+    // Iterate through conditions to build prepared statement WHERE clause
+    for (const field in this.conditions) {
+      if (this.conditions.hasOwnProperty(field)) {
+        whereClauses.push(`${String(field)} = ?`); // Use placeholder
+        queryParams.push(this.conditions[field]); // Add value to params
+      }
+    }
 
-    if (whereClauses) {
-      query += ` WHERE ${whereClauses}`;
+    if (whereClauses.length > 0) {
+      query += ` WHERE ${whereClauses.join(" AND ")}`;
     }
 
     if (this.limitValue !== null) {
-      query += ` LIMIT ${this.limitValue}`;
+      query += ` LIMIT ?`;
+      queryParams.push(this.limitValue); // Add limit value to params
     }
 
     if (this.offsetValue !== null) {
-      query += ` OFFSET ${this.offsetValue}`;
+      query += ` OFFSET ?`;
+      queryParams.push(this.offsetValue); // Add offset value to params
     }
 
-    return query;
+    return { sql: query, params: queryParams }; // Return query and its parameters
   }
 }
 
@@ -333,7 +342,7 @@ class Table<M extends Models, T extends keyof M> {
   public where(
     conditions: Condition<M, T>
   ): Query<M, T, SelectFieldFrom<M, T>, T> {
-    return new Query(this.tableName, [], conditions);
+    return new Query(this.tableName, [], conditions as Condition<M, T>);
   }
 
   public innerJoin<J extends CompatibleJoins<M, T>>(
