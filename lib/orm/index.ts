@@ -60,16 +60,23 @@ async function main(ast: SchemaNode) {
   const db = new DB(ast, sqlClient);
   const result = await db
     .table("barcode")
-    .where({
-      "barcode.metadata": [
-        {
-          type: {
-            nonce: "abc123",
-          },
+    .update({
+      metadata: {
+        type: {
+          nonce: "asldkfj1234",
         },
-      ],
+      },
+    })
+    .where({
+      "barcode.code": "1C234567890",
+      "barcode.metadata": {
+        type: {
+          nonce: "abc1234",
+        },
+      },
     })
     .execute();
+
   console.log("Query Result:", result);
 }
 

@@ -5,7 +5,7 @@ model barcode {
   code string @unique @required
   is_active boolean @default(true)
 
-  metadata json[] {
+  metadata json {
     description: string
     non_vegetarian: boolean
     type : {

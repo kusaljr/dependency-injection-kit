@@ -4,21 +4,27 @@ import { Models } from "../types/schema-types";
 
 type InsertValues<M extends Models, T extends keyof M> = Partial<M[T]>;
 
-type UpdateValues<M extends Models, T extends keyof M> = Partial<M[T]>;
+type DeepPartial<T> = T extends Function
+  ? T
+  : T extends Array<infer U>
+  ? Array<DeepPartial<U>>
+  : T extends object
+  ? { [K in keyof T]?: DeepPartial<T[K]> }
+  : T;
 
-type ExecuteResult<
-  M extends Models,
-  T extends keyof M,
-  F extends string
-> = F extends never
+type UpdateValues<M extends Models, T extends keyof M> = DeepPartial<M[T]>;
+
+type ExecuteResult<M extends Models, T extends keyof M, F extends string> = [
+  F
+] extends [never] | [""]
   ? M[T][]
   : Array<{
-      [K in F as K extends `${string}.${infer Col}`
-        ? Col
-        : never]: K extends `${infer Table}.${infer Col}`
+      [K in F as K extends `${infer Table}.${infer Field}`
+        ? Field
+        : never]: K extends `${infer Table}.${infer Field}`
         ? Table extends keyof M
-          ? Col extends keyof M[Table]
-            ? M[Table][Col]
+          ? Field extends keyof M[Table]
+            ? M[Table][Field]
             : never
           : never
         : never;
@@ -264,14 +270,68 @@ class Query<
     );
   }
 
+  buildJsonSetExpressions(
+    baseField: string,
+    nestedObj: any,
+    getPlaceholder: (value: any) => string,
+    path: string[] = []
+  ): string[] {
+    const expressions: string[] = [];
+
+    for (const key in nestedObj) {
+      const value = nestedObj[key];
+      const currentPath = [...path, key];
+
+      if (
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+      ) {
+        // Recurse deeper
+        expressions.push(
+          ...this.buildJsonSetExpressions(
+            baseField,
+            value,
+            getPlaceholder,
+            currentPath
+          )
+        );
+      } else {
+        const pathArray = `{${currentPath.join(",")}}`;
+        const placeholder = getPlaceholder(value);
+        expressions.push(
+          `${baseField} = jsonb_set(${baseField}, '${pathArray}', ${placeholder}, true)`
+        );
+      }
+    }
+
+    return expressions;
+  }
+
   private _update(values: UpdateValues<M, T>): PreparedStatement {
     const setClauses: string[] = [];
     const updateParams: any[] = [];
     let index = 1;
+
     for (const field in values) {
-      if (values.hasOwnProperty(field)) {
-        setClauses.push(`${String(field)} = $${index++}`);
-        updateParams.push(values[field]);
+      if (!Object.prototype.hasOwnProperty.call(values, field)) continue;
+
+      const modelDef = this.modelsDef[this.tableName as keyof Models];
+      const fieldType = (modelDef as any)?.[field];
+
+      const value = values[field];
+
+      if (fieldType === "json" && typeof value === "object" && value !== null) {
+        // Handle nested JSON field updates
+        const jsonPaths = this.buildJsonSetExpressions(field, value, (val) => {
+          updateParams.push(val);
+          return `$${index++}`;
+        });
+
+        setClauses.push(...jsonPaths);
+      } else {
+        setClauses.push(`${field} = $${index++}`);
+        updateParams.push(value);
       }
     }
 
@@ -280,18 +340,29 @@ class Query<
     }
 
     let sql = `UPDATE ${String(this.tableName)} SET ${setClauses.join(", ")}`;
+
     const whereClauses: string[] = [];
     const whereParams: any[] = [];
 
     for (const field in this.conditions) {
-      if (this.conditions.hasOwnProperty(field)) {
-        whereClauses.push(`${String(field)} = $${index++}`);
+      if (!Object.prototype.hasOwnProperty.call(this.conditions, field))
+        continue;
+
+      const [tableAlias, fieldName] = field.split(".");
+      const modelDef = this.modelsDef[tableAlias as keyof Models];
+      const fieldType = (modelDef as any)?.[fieldName];
+
+      if (fieldType === "json") {
+        whereClauses.push(`${field} @> $${index++}`);
+        whereParams.push(this.conditions[field]);
+      } else {
+        whereClauses.push(`${field} = $${index++}`);
         whereParams.push(this.conditions[field]);
       }
     }
 
     if (whereClauses.length > 0) {
-      sql += ` WHERE ${whereClauses.join(" AND ")} RETURNING *`;
+      sql += ` WHERE ${whereClauses.join(" AND ")}`;
     } else {
       console.warn(
         `WARNING: UPDATE statement for table '${String(
@@ -299,6 +370,9 @@ class Query<
         )}' has no WHERE clause. All rows will be updated.`
       );
     }
+
+    sql += ` RETURNING *`;
+
     return { sql, params: [...updateParams, ...whereParams] };
   }
 
@@ -412,7 +486,6 @@ class Query<
       const { sql: sqlString, params } = this._update(this.updateValues);
       console.log("Executing SQL:", sqlString, params);
       const res = await this.sqlClient.unsafe(sqlString, params); // Use await here
-      console.log("Update Result:", res);
       return res;
     }
 
@@ -525,22 +598,22 @@ class Table<M extends Models, T extends keyof M> {
       null,
       false,
       this.modelsDef // Pass modelsDef
-    );
+    ) as Query<M, T, SelectFieldFrom<M, T>, T>;
   }
 
   public innerJoin<J extends CompatibleJoins<M, T>>(
     target: J,
     on: StrictJoinOn<M, T, J>
   ): Query<M, T, SelectFieldFrom<M, T | J>, T | J> {
-    return new Query(
+    return new Query<M, T, SelectFieldFrom<M, T | J>, T | J>(
       this.tableName,
       this.sqlClient,
-      [],
+      [] as SelectFieldFrom<M, T | J>[],
       {},
       [{ target, type: "inner", on }],
       null,
       null,
-      [this.tableName, target],
+      [this.tableName, target] as (T | J)[],
       null,
       false,
       this.modelsDef // Pass modelsDef
@@ -551,15 +624,15 @@ class Table<M extends Models, T extends keyof M> {
     target: J,
     on: StrictJoinOn<M, T, J>
   ): Query<M, T, SelectFieldFrom<M, T | J>, T | J> {
-    return new Query(
+    return new Query<M, T, SelectFieldFrom<M, T | J>, T | J>(
       this.tableName,
       this.sqlClient,
-      [],
+      [] as SelectFieldFrom<M, T | J>[],
       {},
       [{ target, type: "left", on }],
       null,
       null,
-      [this.tableName, target],
+      [this.tableName, target] as (T | J)[],
       null,
       false,
       this.modelsDef // Pass modelsDef
@@ -570,15 +643,15 @@ class Table<M extends Models, T extends keyof M> {
     target: J,
     on: StrictJoinOn<M, T, J>
   ): Query<M, T, SelectFieldFrom<M, T | J>, T | J> {
-    return new Query(
+    return new Query<M, T, SelectFieldFrom<M, T | J>, T | J>(
       this.tableName,
       this.sqlClient,
-      [],
+      [] as SelectFieldFrom<M, T | J>[],
       {},
       [{ target, type: "right", on }],
       null,
       null,
-      [this.tableName, target],
+      [this.tableName, target] as (T | J)[],
       null,
       false,
       this.modelsDef // Pass modelsDef
@@ -682,7 +755,7 @@ RETURNING *`;
       values,
       false,
       this.modelsDef // Pass modelsDef
-    );
+    ) as Query<M, T, SelectFieldFrom<M, T>, T>;
   }
 
   public delete(): Query<M, T, SelectFieldFrom<M, T>, T> {
@@ -698,7 +771,7 @@ RETURNING *`;
       null,
       true,
       this.modelsDef // Pass modelsDef
-    );
+    ) as Query<M, T, SelectFieldFrom<M, T>, T>;
   }
 }
 

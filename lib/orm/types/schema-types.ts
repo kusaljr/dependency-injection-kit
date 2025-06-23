@@ -4,14 +4,14 @@ export type barcode = {
   id? : number;
   code : string;
   is_active? : boolean;
-  metadata? : Array<{ description: string
+  metadata? : { description: string
     non_vegetarian: boolean
     type : {
       nonce: string
       hash: string
     }
     ingredients: string[]
-    calories?: number }>;
+    calories?: number };
   created_at? : string;
   updated_at? : string;
 };
