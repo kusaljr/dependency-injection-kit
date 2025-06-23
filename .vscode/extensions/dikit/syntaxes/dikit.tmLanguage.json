@@ -3,89 +3,94 @@
   "name": "Dikit Schema",
   "scopeName": "source.dikit",
   "fileTypes": ["dikit"],
-  "patterns": [
-    {
-      "include": "#model-definition"
-    },
-    {
-      "include": "#field-definition"
-    },
-    {
-      "include": "#decorators"
-    },
-    {
-      "include": "#types"
-    },
-    {
-      "include": "#comments"
-    }
-  ],
+  "patterns": [{ "include": "#model-definition" }, { "include": "#comments" }],
   "repository": {
     "model-definition": {
       "begin": "\\b(model)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{",
       "beginCaptures": {
-        "1": {
-          "name": "keyword.control.dikit"
-        },
-        "2": {
-          "name": "entity.name.type.model.dikit"
-        }
+        "1": { "name": "keyword.control.dikit" },
+        "2": { "name": "entity.name.type.model.dikit" }
       },
       "end": "\\}",
       "patterns": [
-        {
-          "include": "#field-definition"
-        },
-        {
-          "include": "#decorators"
-        }
+        { "include": "#field-definition" },
+        { "include": "#json-block" },
+        { "include": "#decorators" },
+        { "include": "#comments" }
       ]
     },
+
     "field-definition": {
-      "match": "^\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(\\[\\])?",
+      "match": "^\\s*([a-zA-Z_][a-zA-Z0-9_]*)(\\?)?\\s*:\\s*([a-zA-Z_][a-zA-Z0-9_]*)(\\[\\])?",
       "captures": {
-        "1": {
-          "name": "variable.other.property.dikit"
-        },
-        "2": {
-          "name": "storage.type.dikit"
-        },
-        "3": {
-          "name": "punctuation.definition.array.dikit"
-        }
+        "1": { "name": "variable.other.property.dikit" },
+        "2": { "name": "punctuation.definition.optional.dikit" },
+        "3": { "name": "storage.type.dikit" },
+        "4": { "name": "punctuation.definition.array.dikit" }
       }
     },
+
+    "json-block": {
+      "begin": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s+(json)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "variable.other.property.dikit" },
+        "2": { "name": "storage.type.dikit" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.block.end.dikit" }
+      },
+      "patterns": [
+        { "include": "#field-definition" },
+        { "include": "#json-nested-block" },
+        { "include": "#decorators" },
+        { "include": "#comments" }
+      ]
+    },
+
+    "json-nested-block": {
+      "begin": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*:\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "variable.other.property.dikit" }
+      },
+      "end": "\\}",
+      "patterns": [
+        { "include": "#field-definition" },
+        { "include": "#json-nested-block" },
+        { "include": "#decorators" },
+        { "include": "#comments" }
+      ]
+    },
+
     "decorators": {
       "patterns": [
         {
           "match": "@([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "0": {
-              "name": "entity.name.function.decorator.dikit"
-            }
+            "1": { "name": "entity.name.function.decorator.dikit" }
           }
         },
         {
           "begin": "@([a-zA-Z_][a-zA-Z0-9_]*)\\(",
           "beginCaptures": {
-            "1": {
-              "name": "entity.name.function.decorator.dikit"
-            }
+            "1": { "name": "entity.name.function.decorator.dikit" }
           },
           "end": "\\)",
           "patterns": [
             {
-              "match": "[a-zA-Z_][a-zA-Z0-9_]*",
+              "match": "[a-zA-Z0-9_\\.\\-]+",
               "name": "variable.parameter.dikit"
             }
           ]
         }
       ]
     },
+
     "types": {
-      "match": "\\b(int|string|float|boolean|date|datetime|text)\\b",
+      "match": "\\b(int|string|float|boolean|date|datetime|text|json|number)\\b",
       "name": "storage.type.primitive.dikit"
     },
+
     "comments": {
       "patterns": [
         {

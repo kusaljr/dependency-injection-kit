@@ -158,7 +158,7 @@ class Query<
       this.limitValue,
       this.offsetValue,
       this.joinedTables,
-      null,
+      this.updateValues,
       false,
       this.modelsDef // Pass modelsDef
     );
@@ -308,10 +308,34 @@ class Query<
     return expressions;
   }
 
+  private collectJsonPaths(
+    obj: any,
+    path: string[] = []
+  ): { path: string[]; val: any }[] {
+    const results: { path: string[]; val: any }[] = [];
+
+    for (const key in obj) {
+      const value = obj[key];
+      const newPath = [...path, key];
+
+      if (typeof value === "object" && value !== null) {
+        results.push(...this.collectJsonPaths(value, newPath));
+      } else {
+        results.push({ path: newPath, val: value });
+      }
+    }
+
+    return results;
+  }
+
   private _update(values: UpdateValues<M, T>): PreparedStatement {
     const setClauses: string[] = [];
     const updateParams: any[] = [];
     let index = 1;
+
+    // Track JSON updates by field
+    const jsonFieldUpdates: Record<string, { path: string[]; value: any }[]> =
+      {};
 
     for (const field in values) {
       if (!Object.prototype.hasOwnProperty.call(values, field)) continue;
@@ -322,17 +346,32 @@ class Query<
       const value = values[field];
 
       if (fieldType === "json" && typeof value === "object" && value !== null) {
-        // Handle nested JSON field updates
-        const jsonPaths = this.buildJsonSetExpressions(field, value, (val) => {
-          updateParams.push(val);
-          return `$${index++}`;
-        });
+        // Collect all nested JSON paths
+        const jsonPaths = this.collectJsonPaths(value);
 
-        setClauses.push(...jsonPaths);
+        for (const { path, val } of jsonPaths) {
+          if (!jsonFieldUpdates[field]) jsonFieldUpdates[field] = [];
+          jsonFieldUpdates[field].push({ path, value: val });
+        }
       } else {
         setClauses.push(`${field} = $${index++}`);
         updateParams.push(value);
       }
+    }
+
+    // Handle jsonb_set chains for each JSON field (like metadata)
+    for (const jsonField in jsonFieldUpdates) {
+      const updates = jsonFieldUpdates[jsonField];
+      let expr = jsonField;
+
+      for (const update of updates) {
+        const pathStr = `{${update.path.join(",")}}`;
+        const paramPlaceholder = `$${index++}`;
+        expr = `jsonb_set(${expr}, '${pathStr}', ${paramPlaceholder}, true)`;
+        updateParams.push(update.value);
+      }
+
+      setClauses.push(`${jsonField} = ${expr}`);
     }
 
     if (setClauses.length === 0) {
@@ -371,7 +410,12 @@ class Query<
       );
     }
 
-    sql += ` RETURNING *`;
+    sql += ` RETURNING`;
+    if (this.selectedFields.length > 0) {
+      sql += ` ${this.selectedFields.join(", ")}`;
+    } else {
+      sql += ` *`;
+    }
 
     return { sql, params: [...updateParams, ...whereParams] };
   }
@@ -389,7 +433,14 @@ class Query<
     }
 
     if (whereClauses.length > 0) {
-      sql += ` WHERE ${whereClauses.join(" AND ")} RETURNING *`;
+      sql += ` WHERE ${whereClauses.join(" AND ")}`;
+      sql += ` RETURNING`;
+
+      if (this.selectedFields.length > 0) {
+        sql += ` ${this.selectedFields.join(", ")}`;
+      } else {
+        sql += ` *`;
+      }
     } else {
       console.warn(
         `WARNING: DELETE statement for table '${String(
