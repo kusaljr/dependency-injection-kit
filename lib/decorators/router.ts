@@ -20,10 +20,18 @@ export interface RouteDefinition {
   handlerName: string | symbol;
 }
 
-export function Controller(prefix: string = "/"): ClassDecorator {
-  return (target: Function) => {
-    Reflect.defineMetadata("prefix", prefix, target);
+type PathStartingWithSlash = `/${string}`;
 
+export function Controller(
+  prefix: PathStartingWithSlash = "/"
+): ClassDecorator {
+  return (target: Function) => {
+    if (typeof prefix !== "string" || !prefix.startsWith("/")) {
+      throw new TypeError(
+        `Controller prefix must be a string starting with '/'. Received: "${prefix}"`
+      );
+    }
+    Reflect.defineMetadata("prefix", prefix, target);
     Reflect.defineMetadata("injectable", true, target);
   };
 }
