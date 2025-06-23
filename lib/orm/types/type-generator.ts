@@ -30,6 +30,17 @@ ${modelsMapping}
 }
 
 function mapFieldType(field: SchemaNode["models"][0]["fields"][0]): string {
+  if (field.fieldType === "json" && field.jsonTypeDefinition?.raw) {
+    let base = field.jsonTypeDefinition.raw.trim();
+
+    if (base.startsWith("{") && base.endsWith("}")) {
+      base = base.slice(1, -1).trim();
+      base = `{ ${base} }`;
+    }
+
+    return field.jsonTypeDefinition.isArray ? `Array<${base}>` : base;
+  }
+
   if (field.fieldType === "int" || field.fieldType === "float") return "number";
   if (
     field.fieldType === "string" ||
@@ -37,5 +48,7 @@ function mapFieldType(field: SchemaNode["models"][0]["fields"][0]): string {
     field.fieldType === "datetime"
   )
     return "string";
+  if (field.fieldType === "boolean") return "boolean";
+
   return field.isArray ? `${field.fieldType}[]` : field.fieldType;
 }

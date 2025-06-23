@@ -9,6 +9,7 @@ export enum TokenType {
   FLOAT_TYPE = "FLOAT_TYPE",
   BOOLEAN_TYPE = "BOOLEAN_TYPE",
   JSON_TYPE = "JSON_TYPE",
+  JSON_ARRAY_TYPE = "JSON_ARRAY_TYPE",
   DATETIME_TYPE = "DATETIME_TYPE",
 
   COLON = "COLON", // :
@@ -28,6 +29,8 @@ export enum TokenType {
   STRING_LITERAL = "STRING_LITERAL",
   NUMBER_LITERAL = "NUMBER_LITERAL",
 
+  TYPESCRIPT_INTERFACE = "TYPESCRIPT_INTERFACE",
+
   EOF = "EOF",
   UNKNOWN = "UNKNOWN",
   type = "type",
@@ -45,6 +48,7 @@ export class Lexer {
   private position = 0;
   private lineNumber = 1;
   private columnNumber = 1;
+  private expectingJsonBlock = false;
 
   constructor(input: string) {
     this.input = input;
@@ -93,6 +97,25 @@ export class Lexer {
     return tokens;
   }
 
+  private consumeCurlyBlock(): string {
+    let value = "";
+    let depth = 0;
+
+    while (this.position < this.input.length) {
+      const char = this.advance();
+      value += char;
+
+      if (char === "{") {
+        depth++;
+      } else if (char === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+
+    return value;
+  }
+
   private getNextToken(): Token {
     this.skipWhitespaceAndComments();
 
@@ -104,8 +127,18 @@ export class Lexer {
 
     switch (char) {
       case "{":
-        this.advance();
-        return this.createToken(TokenType.LCURLY, "{");
+        if (this.expectingJsonBlock) {
+          this.expectingJsonBlock = false;
+          const jsonBlock = this.consumeCurlyBlock();
+          return this.createToken(
+            TokenType.TYPESCRIPT_INTERFACE,
+            jsonBlock,
+            jsonBlock.length
+          );
+        } else {
+          this.advance();
+          return this.createToken(TokenType.LCURLY, "{");
+        }
       case "}":
         this.advance();
         return this.createToken(TokenType.RCURLY, "}");
@@ -165,8 +198,36 @@ export class Lexer {
               return this.createToken(TokenType.FLOAT_TYPE, value);
             case "boolean":
               return this.createToken(TokenType.BOOLEAN_TYPE, value);
-            case "json":
-              return this.createToken(TokenType.JSON_TYPE, value);
+            case "json": {
+              const jsonToken = this.createToken(
+                this.peek() === "[" && this.peek(1) === "]"
+                  ? TokenType.JSON_ARRAY_TYPE
+                  : TokenType.JSON_TYPE,
+                value
+              );
+
+              this.skipWhitespaceAndComments();
+              if (this.peek() === "[") {
+                this.advance();
+                if (this.peek() === "]") {
+                  this.advance();
+                } else {
+                  throw new Error(
+                    `Invalid json[] syntax at line ${this.lineNumber}, column ${this.columnNumber}`
+                  );
+                }
+              }
+
+              this.skipWhitespaceAndComments();
+              if (this.peek() !== "{") {
+                throw new Error(
+                  `Expected '{' after json type at line ${this.lineNumber}, column ${this.columnNumber}`
+                );
+              }
+
+              this.expectingJsonBlock = true;
+              return jsonToken;
+            }
             case "datetime":
               return this.createToken(TokenType.DATETIME_TYPE, value);
             default:

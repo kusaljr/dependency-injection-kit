@@ -193,13 +193,15 @@ export class SqlGenerator {
       }
     }
 
-    // Type change
     if (currField.fieldType !== prevField.fieldType) {
       const sqlType = this.mapFieldTypeToSql(currField.fieldType);
       if (sqlType) {
-        stmts.push(
-          `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} TYPE ${sqlType};`
-        );
+        let alter = `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} TYPE ${sqlType}`;
+        if (this.dialect === "postgresql" && currField.fieldType === "json") {
+          alter += ` USING ${currField.name}::${sqlType}`;
+        }
+        alter += ";";
+        stmts.push(alter);
       }
     }
 
@@ -247,8 +249,29 @@ export class SqlGenerator {
   }
 
   private generateColumnDefinition(field: FieldNode): string {
-    const sqlType = this.mapFieldTypeToSql(field.fieldType);
+    let sqlType = this.mapFieldTypeToSql(field.fieldType);
     if (!sqlType) throw new Error(`No SQL type for ${field.fieldType}`);
+
+    // Handle json[]
+    if (field.fieldType === "json" && field.jsonTypeDefinition?.isArray) {
+      // Instead of making a PostgreSQL jsonb[] array, just keep as jsonb
+      switch (this.dialect) {
+        case "postgresql":
+          // Override to plain JSONB (no array)
+          sqlType = "JSONB";
+          break;
+        case "mysql":
+          // MySQL stores JSON as JSON type anyway, no array support
+          sqlType = "JSON";
+          break;
+        case "sqlite":
+          // SQLite uses TEXT for JSON
+          sqlType = "TEXT";
+          break;
+        default:
+          sqlType = "TEXT";
+      }
+    }
 
     let col = `${field.name} ${sqlType}`;
 

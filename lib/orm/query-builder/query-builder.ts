@@ -60,10 +60,18 @@ type StrictJoinOn<M extends Models, T extends keyof M, J extends keyof M> =
       ? `${J & string}.${ForeignKeyOf<M, J, T> & string} = ${T & string}.id`
       : never);
 
+type NestedValue<T> = T extends (infer U)[]
+  ? NestedValue<U>[] // Handle arrays by applying NestedValue recursively
+  : T extends object
+  ? {
+      [K in keyof T]?: NestedValue<T[K]>;
+    }
+  : T;
+
 type Condition<M extends Models, JT extends keyof M> = Partial<
   {
     [T in JT]: {
-      [K in keyof M[T] as `${T & string}.${K & string}`]: M[T][K];
+      [K in keyof M[T] as `${T & string}.${K & string}`]: NestedValue<M[T][K]>;
     };
   }[JT]
 >;
@@ -367,13 +375,21 @@ class Query<
     const params: any[] = [];
     let idx = 1;
     for (const [k, v] of Object.entries(this.conditions)) {
-      whereClauses.push(`${k} = $${idx++}`);
-      params.push(v);
+      // Logic for JSON type handling in buildJsonAggSQL
+      const [tableAlias, fieldName] = k.split(".");
+      const modelDef = this.modelsDef[tableAlias as keyof Models];
+      if (modelDef && (modelDef as any)[fieldName] === "json") {
+        whereClauses.push(`${k} @> $${idx++}`);
+        params.push(JSON.stringify(v).replace(/\\/g, ""));
+      } else {
+        whereClauses.push(`${k} = $${idx++}`);
+        params.push(v);
+      }
     }
 
     // Build query
     let query = `
-    SELECT 
+    SELECT
       ${mainFields},
       json_agg(
         json_build_object(${joinFields})
@@ -418,7 +434,6 @@ class Query<
 
     let paramIndex = 1;
 
-    // SELECT query (regular select)
     const fieldsStr =
       this.selectedFields.length > 0
         ? this.selectedFields.join(", ")
@@ -434,11 +449,20 @@ class Query<
     });
 
     const whereClauses: string[] = [];
-    // Conditions can refer to fields from any joined table, so we iterate through all joinedTables
     for (const conditionKey in this.conditions) {
       if (this.conditions.hasOwnProperty(conditionKey)) {
-        whereClauses.push(`${conditionKey} = $${paramIndex++}`);
-        queryParams.push((this.conditions as any)[conditionKey]);
+        // Extract table alias and field name from the conditionKey
+        const [tableAlias, fieldName] = conditionKey.split(".");
+        const modelDef = this.modelsDef[tableAlias as keyof Models];
+
+        if (modelDef && (modelDef as any)[fieldName] === "json") {
+          whereClauses.push(`${conditionKey} @> $${paramIndex++}`);
+          const jsonValue = (this.conditions as any)[conditionKey];
+          queryParams.push(jsonValue);
+        } else {
+          whereClauses.push(`${conditionKey} = $${paramIndex++}`);
+          queryParams.push((this.conditions as any)[conditionKey]);
+        }
       }
     }
 
@@ -581,7 +605,10 @@ class Table<M extends Models, T extends keyof M> {
     const allPlaceholders: string[] = [];
 
     rows.forEach((row, rowIndex) => {
-      const rowParams = fields.map((f) => (row as Record<string, any>)[f]);
+      const rowParams = fields.map((f) => {
+        const val = (row as Record<string, any>)[f];
+        return val;
+      });
       allParams.push(...rowParams);
 
       const offset = rowIndex * fields.length;
@@ -682,11 +709,9 @@ export class DB<M extends Models> {
     // Populate modelsDef from ast.models
     this.modelsDef = {} as M;
     this.ast.models.forEach((model) => {
-      // Assuming model.name is the table name and model.fields define its structure
-      // You might need to adjust this based on the exact structure of SchemaNode and its models
       (this.modelsDef as any)[model.name] = model.fields.reduce(
         (acc: any, field: any) => {
-          acc[field.name] = field.type; // Store field name and type (or whatever defines it as non-object)
+          acc[field.name] = field.fieldType; // Store field name and type (or whatever defines it as non-object)
           return acc;
         },
         {}

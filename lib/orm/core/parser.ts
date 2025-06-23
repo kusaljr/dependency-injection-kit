@@ -1,6 +1,5 @@
 import {
   FieldNode,
-  JsonFieldNode,
   JsonTypeDefinitionNode,
   ModelNode,
   RelationEnum,
@@ -193,12 +192,27 @@ export class Parser {
     return fields;
   }
 
+  private parseJsonTypeDefinitionFromRaw(
+    raw: string,
+    line: number,
+    column: number,
+    isArray = false
+  ): JsonTypeDefinitionNode {
+    // Just store the raw string directly instead of parsing fields
+    return {
+      kind: "JsonTypeDefinition",
+      raw,
+      line,
+      isArray,
+      column,
+    };
+  }
+
   private parseFieldDefinition(): FieldNode {
     const nameToken = this.consume(TokenType.IDENTIFIER, "Expected field name");
 
     let fieldType = "";
     let jsonTypeDefinition: JsonTypeDefinitionNode | undefined;
-    let isArray = false;
 
     const typeToken = this.peek();
     if (
@@ -210,18 +224,39 @@ export class Parser {
     ) {
       fieldType = typeToken.value;
       this.advance();
-    } else if (typeToken.type === TokenType.JSON_TYPE) {
+    } else if (
+      typeToken.type === TokenType.JSON_TYPE ||
+      typeToken.type === TokenType.JSON_ARRAY_TYPE
+    ) {
       fieldType = "json";
       this.advance();
 
-      if (this.peek().type === TokenType.LPAREN) {
+      if (
+        this.peek(-1).type === TokenType.LBRACKET &&
+        this.peek(-2).type === TokenType.RBRACKET
+      ) {
         this.advance();
-        jsonTypeDefinition = this.parseJsonTypeDefinition();
-        this.consume(
-          TokenType.RPAREN,
-          "Expected ')' after json type definition"
+        this.advance();
+      }
+
+      // Require a TYPESCRIPT_INTERFACE token next
+      const interfaceToken = this.peek();
+      if (interfaceToken.type !== TokenType.TYPESCRIPT_INTERFACE) {
+        throw new SyntaxError(
+          `Expected JSON type block after 'json `,
+          interfaceToken.line,
+          interfaceToken.column
         );
       }
+
+      // Advance and parse the block content
+      const raw = this.advance().value;
+      jsonTypeDefinition = this.parseJsonTypeDefinitionFromRaw(
+        raw,
+        interfaceToken.line,
+        interfaceToken.column,
+        typeToken.type === TokenType.JSON_ARRAY_TYPE
+      );
     } else if (typeToken.type === TokenType.IDENTIFIER) {
       fieldType = typeToken.value;
       this.advance();
@@ -239,7 +274,6 @@ export class Parser {
     ) {
       this.advance();
       this.advance();
-      isArray = true;
     }
 
     let relation: FieldNode["relation"];
@@ -331,7 +365,6 @@ export class Parser {
       kind: "Field",
       name: nameToken.value,
       fieldType,
-      isArray,
       jsonTypeDefinition,
       relation,
       isPrimaryKey,
@@ -340,60 +373,6 @@ export class Parser {
       defaultValue,
       line: nameToken.line,
       column: nameToken.column,
-    };
-  }
-
-  private parseJsonTypeDefinition(): JsonTypeDefinitionNode {
-    this.consume(TokenType.LCURLY, "Expected '{' in json type definition");
-    const fields: JsonFieldNode[] = [];
-
-    while (this.peek().type !== TokenType.RCURLY) {
-      const nameTok = this.consume(
-        TokenType.IDENTIFIER,
-        "Expected JSON field name"
-      );
-      const typeTok = this.advance();
-
-      if (
-        typeTok.type !== TokenType.INT_TYPE &&
-        typeTok.type !== TokenType.STRING_TYPE &&
-        typeTok.type !== TokenType.FLOAT_TYPE &&
-        typeTok.type !== TokenType.BOOLEAN_TYPE &&
-        typeTok.type !== TokenType.DATETIME_TYPE &&
-        typeTok.type !== TokenType.IDENTIFIER
-      ) {
-        throw new SyntaxError(
-          `Invalid JSON field type '${typeTok.value}'`,
-          typeTok.line,
-          typeTok.column
-        );
-      }
-
-      fields.push({
-        kind: "JsonField",
-        name: nameTok.value,
-        fieldType: typeTok.value,
-        line: nameTok.line,
-        column: nameTok.column,
-      });
-
-      if (this.peek().type === TokenType.COMMA) {
-        this.advance();
-      } else if (this.peek().type !== TokenType.RCURLY) {
-        throw new SyntaxError(
-          "Expected ',' or '}' in json type definition",
-          this.peek().line,
-          this.peek().column
-        );
-      }
-    }
-
-    this.consume(TokenType.RCURLY, "Expected '}' in json type definition");
-    return {
-      kind: "JsonTypeDefinition",
-      fields,
-      line: fields[0]?.line ?? 0,
-      column: fields[0]?.column ?? 0,
     };
   }
 }

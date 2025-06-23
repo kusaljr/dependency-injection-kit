@@ -4,14 +4,14 @@ export async function fetchSchemaAstFromDb(sql: SQL): Promise<SchemaNode> {
   // Fetch columns
   const columns = await sql`
     SELECT
-      c.table_name,
-      c.column_name,
-      c.data_type,
-      c.is_nullable,
-      c.column_default
-    FROM information_schema.columns c
-    WHERE c.table_schema = 'public'
-    ORDER BY c.table_name, c.ordinal_position;
+  c.table_name,
+  c.column_name,
+  c.data_type,
+  c.udt_name,
+  c.is_nullable,
+  c.column_default
+FROM information_schema.columns c
+WHERE c.table_schema = 'public'
   `;
 
   // Fetch constraints
@@ -43,14 +43,16 @@ export async function fetchSchemaAstFromDb(sql: SQL): Promise<SchemaNode> {
       };
     }
 
+    const { type, isArray } = mapPgTypeToFieldType(col.data_type, col.udt_name);
+
     const field: FieldNode = {
       kind: "Field",
       name: col.column_name,
-      fieldType: mapPgTypeToFieldType(col.data_type),
-      isArray: false,
-      isPrimaryKey: false, // Will fill later
+      fieldType: type,
+      isArray,
+      isPrimaryKey: false, // Will be set via constraints
       isRequired: col.is_nullable === "NO",
-      isUnique: false, // Will fill later
+      isUnique: false,
       defaultValue: parsePgDefault(col.column_default),
       line: 0,
       column: 0,
@@ -86,7 +88,6 @@ export async function fetchSchemaAstFromDb(sql: SQL): Promise<SchemaNode> {
       const refMatch = c.definition.match(/REFERENCES\s+(\w+)\s*\(([^)]+)\)/);
       if (!refMatch) return;
       const refTable = refMatch[1];
-      const refCols = refMatch[2].split(",").map((s: string) => s.trim());
 
       cols.forEach((colName, i) => {
         const field = model.fields.find((f) => f.name === colName);
@@ -136,54 +137,55 @@ function extractCols(definition: string): string[] {
 function parsePgDefault(defVal: string | null): any {
   if (!defVal) return undefined;
 
-  // Handle autoincrement serial
-  if (defVal.includes("nextval")) {
+  // Handle autoincrement serial (nextval('some_sequence'::regclass))
+  if (/^nextval\('.*_seq'::regclass\)/.test(defVal)) {
     return { kind: "FunctionCall", name: "autoincrement" };
   }
 
-  // Handle now()
-  if (defVal.startsWith("now()")) {
-    return { kind: "FunctionCall", name: "now" };
-  }
-
-  // Handle true/false
   if (defVal === "true" || defVal === "false") {
     return defVal === "true";
   }
 
-  // Handle numeric
   if (!isNaN(Number(defVal))) {
     return Number(defVal);
   }
 
-  // Handle string literal
   const strMatch = defVal.match(/^'(.*)'::/);
   if (strMatch) return strMatch[1];
+
+  if (defVal.startsWith("now()")) {
+    return { kind: "FunctionCall", name: "now" };
+  }
 
   return defVal;
 }
 
-function mapPgTypeToFieldType(pgType: string): string {
-  switch (pgType) {
-    case "integer":
-      return "int";
-    case "character varying":
-      return "string";
-    case "text":
-      return "string";
-    case "boolean":
-      return "boolean";
-    case "real":
-      return "float";
-    case "jsonb":
-    case "json":
-      return "json";
-    case "timestamp without time zone":
-    case "timestamp with time zone":
-      return "datetime";
-    case "date":
-      return "date";
-    default:
-      return "string";
+function mapPgTypeToFieldType(
+  pgType: string,
+  udtName: string
+): { type: string; isArray: boolean } {
+  const base: Record<string, string> = {
+    int4: "int",
+    integer: "int",
+    varchar: "string",
+    "character varying": "string",
+    text: "string",
+    bool: "boolean",
+    boolean: "boolean",
+    real: "float",
+    float4: "float",
+    json: "json",
+    jsonb: "json",
+    timestamp: "datetime",
+    "timestamp without time zone": "datetime",
+    "timestamp with time zone": "datetime",
+    date: "date",
+  };
+
+  if (pgType === "ARRAY" && udtName.startsWith("_")) {
+    const inner = udtName.slice(1);
+    return { type: base[inner] || "string", isArray: true };
   }
+
+  return { type: base[pgType] || "string", isArray: false };
 }

@@ -49,7 +49,8 @@ export interface FieldNode extends AstNode {
 
 export interface JsonTypeDefinitionNode extends AstNode {
   kind: "JsonTypeDefinition";
-  fields: JsonFieldNode[];
+  raw: string;
+  isArray?: boolean; // indicates if this JSON type is an array
 }
 
 export interface JsonFieldNode extends AstNode {
