@@ -11,7 +11,8 @@ export type barcode = {
       hash: string
     }
     ingredients: string[]
-    calories?: number };
+    calories?: number  
+    code_type?: string };
   created_at? : string;
   updated_at? : string;
 };

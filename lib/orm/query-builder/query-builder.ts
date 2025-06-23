@@ -146,7 +146,7 @@ class Query<
   public select<N extends SelectFieldFrom<M, JT>>(
     fields: N[]
   ): Query<M, T, N, JT> {
-    if (this.updateValues || this.isDeleteOperation) {
+    if (this.isDeleteOperation) {
       throw new Error("SELECT cannot be used after update() or delete().");
     }
     return new Query(

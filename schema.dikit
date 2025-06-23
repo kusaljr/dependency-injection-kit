@@ -13,7 +13,8 @@ model barcode {
       hash: string
     }
     ingredients: string[]
-    calories?: number    
+    calories?: number  
+    code_type?: string  
   }
 
   created_at datetime @default(now()) 

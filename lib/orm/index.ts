@@ -65,19 +65,21 @@ async function main(ast: SchemaNode) {
         type: {
           nonce: "asldkfj1234",
         },
+        code_type: "QR",
       },
     })
     .where({
       "barcode.code": "1C234567890",
       "barcode.metadata": {
         type: {
-          nonce: "abc1234",
+          nonce: "asldkfj1234",
         },
       },
     })
+    .select(["barcode.code"])
     .execute();
 
-  console.log("Query Result:", result);
+  console.log("Query Result:", result[0]);
 }
 
 main(ast);
