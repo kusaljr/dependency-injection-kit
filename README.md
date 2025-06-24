@@ -166,6 +166,6 @@ export class ExampleController {
 
 
 ## Object-Relational Mapping (ORM)
-This library provides a simple Object Relational Mapping (ORM) system for managing database interactions in a Python application. It allows you to define models that map to database tables, perform CRUD operations, and manage relationships between models.
+This library provides a simple Object Relational Mapping (ORM) system for managing database interactions in a your application. It allows you to define models that map to database tables, perform CRUD operations, and manage relationships between models.
 
 For documentation on how to use the ORM, please refer to the [ORM documentation](./lib/orm/README.md).

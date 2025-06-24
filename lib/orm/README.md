@@ -1,6 +1,6 @@
 # DIKIT Object Relational Mapping (ORM)
 
-This module provides a simple Object Relational Mapping (ORM) system for managing database interactions in a Python application. It allows you to define models that map to database tables, perform CRUD operations, and manage relationships between models.
+This module provides a simple Object Relational Mapping (ORM) system for managing database interactions in your application. It allows you to define models that map to database tables, perform CRUD operations, and manage relationships between models.
 
 ## Schema Definition
 

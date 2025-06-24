@@ -2,6 +2,28 @@ import { SQL } from "bun";
 import { SchemaNode } from "../core/ast";
 import { Models } from "../types/schema-types";
 
+// ANSI escape codes for colors
+const Colors = {
+  Reset: "\x1b[0m",
+  Green: "\x1b[32m",
+  Yellow: "\x1b[33m",
+  Red: "\x1b[31m",
+};
+
+function logQueryExecution(sql: string, durationMs: number) {
+  let color = Colors.Red;
+  if (durationMs < 100) {
+    color = Colors.Green;
+  } else if (durationMs < 200) {
+    color = Colors.Yellow;
+  }
+
+  console.log(`Executing SQL: ${sql}`);
+  console.log(
+    `Execution Time: ${color}${durationMs.toFixed(2)}ms${Colors.Reset}`
+  );
+}
+
 type InsertValues<M extends Models, T extends keyof M> = Partial<M[T]>;
 
 type DeepPartial<T> = T extends Function
@@ -533,80 +555,81 @@ class Query<
   }
 
   public async execute(): Promise<ExecuteResult<M, T, F>> {
+    let sqlString: string;
+    let params: any[];
+    let res: any;
+
+    const startTime = process.hrtime.bigint(); // High-resolution time
+
     if (this.updateValues) {
-      const { sql: sqlString, params } = this._update(this.updateValues);
-      console.log("Executing SQL:", sqlString, params);
-      const res = await this.sqlClient.unsafe(sqlString, params); // Use await here
-      return res;
-    }
+      ({ sql: sqlString, params } = this._update(this.updateValues));
+      res = await this.sqlClient.unsafe(sqlString, params);
+    } else if (this.isDeleteOperation) {
+      ({ sql: sqlString, params } = this._delete());
+      res = await this.sqlClient.unsafe(sqlString, params);
+    } else {
+      // Determine if it's a json_agg query
+      const isJsonAggQuery = this.joins.length > 0;
 
-    if (this.isDeleteOperation) {
-      const { sql: sqlString, params } = this._delete();
-      console.log("Executing SQL:", sqlString, params);
-      return await this.sqlClient.unsafe(sqlString, params); // Use await here
-    }
+      if (isJsonAggQuery) {
+        ({ query: sqlString, params } = this.buildJsonAggSQL());
+      } else {
+        let paramIndex = 1;
 
-    // Determine if it's a json_agg query
-    const isJsonAggQuery = this.joins.length > 0;
+        const fieldsStr =
+          this.selectedFields.length > 0
+            ? this.selectedFields.join(", ")
+            : `${String(this.tableName)}.*`;
 
-    if (isJsonAggQuery) {
-      console.log("Detected JSON_AGG query with joins and no selected fields.");
-      const { query, params } = this.buildJsonAggSQL();
-      console.log("Executing JSON_AGG SQL:", query, "with params:", params);
-      return this.sqlClient.unsafe(query, params);
-    }
+        sqlString = `SELECT ${fieldsStr} FROM ${String(this.tableName)}`;
+        params = [];
 
-    let paramIndex = 1;
+        this.joins.forEach((join) => {
+          sqlString += ` ${join.type.toUpperCase()} JOIN ${String(
+            join.target
+          )} ON ${join.on}`;
+        });
 
-    const fieldsStr =
-      this.selectedFields.length > 0
-        ? this.selectedFields.join(", ")
-        : `${String(this.tableName)}.*`;
+        const whereClauses: string[] = [];
+        for (const conditionKey in this.conditions) {
+          if (this.conditions.hasOwnProperty(conditionKey)) {
+            // Extract table alias and field name from the conditionKey
+            const [tableAlias, fieldName] = conditionKey.split(".");
+            const modelDef = this.modelsDef[tableAlias as keyof Models];
 
-    let query = `SELECT ${fieldsStr} FROM ${String(this.tableName)}`;
-    const queryParams: any[] = [];
+            if (modelDef && (modelDef as any)[fieldName] === "json") {
+              whereClauses.push(`${conditionKey} @> $${paramIndex++}`);
+              const jsonValue = (this.conditions as any)[conditionKey];
+              params.push(jsonValue);
+            } else {
+              whereClauses.push(`${conditionKey} = $${paramIndex++}`);
+              params.push((this.conditions as any)[conditionKey]);
+            }
+          }
+        }
 
-    this.joins.forEach((join) => {
-      query += ` ${join.type.toUpperCase()} JOIN ${String(join.target)} ON ${
-        join.on
-      }`;
-    });
+        if (whereClauses.length > 0) {
+          sqlString += ` WHERE ${whereClauses.join(" AND ")}`;
+        }
 
-    const whereClauses: string[] = [];
-    for (const conditionKey in this.conditions) {
-      if (this.conditions.hasOwnProperty(conditionKey)) {
-        // Extract table alias and field name from the conditionKey
-        const [tableAlias, fieldName] = conditionKey.split(".");
-        const modelDef = this.modelsDef[tableAlias as keyof Models];
+        if (this.limitValue !== null) {
+          sqlString += ` LIMIT $${paramIndex++}`; // Use placeholder for LIMIT
+          params.push(this.limitValue);
+        }
 
-        if (modelDef && (modelDef as any)[fieldName] === "json") {
-          whereClauses.push(`${conditionKey} @> $${paramIndex++}`);
-          const jsonValue = (this.conditions as any)[conditionKey];
-          queryParams.push(jsonValue);
-        } else {
-          whereClauses.push(`${conditionKey} = $${paramIndex++}`);
-          queryParams.push((this.conditions as any)[conditionKey]);
+        if (this.offsetValue !== null) {
+          sqlString += ` OFFSET $${paramIndex++}`;
+          params.push(this.offsetValue);
         }
       }
+      res = await this.sqlClient.unsafe(sqlString, params);
     }
 
-    if (whereClauses.length > 0) {
-      query += ` WHERE ${whereClauses.join(" AND ")}`;
-    }
+    const endTime = process.hrtime.bigint();
+    const durationMs = Number(endTime - startTime) / 1_000_000; // Convert nanoseconds to milliseconds
+    logQueryExecution(sqlString, durationMs);
 
-    if (this.limitValue !== null) {
-      query += ` LIMIT $${paramIndex++}`; // Use placeholder for LIMIT
-      queryParams.push(this.limitValue);
-    }
-
-    if (this.offsetValue !== null) {
-      query += ` OFFSET $${paramIndex++}`;
-      queryParams.push(this.offsetValue);
-    }
-
-    console.log("Executing SQL:", query, "with params:", queryParams);
-
-    return this.sqlClient.unsafe(query, queryParams);
+    return res;
   }
 }
 
@@ -746,9 +769,12 @@ class Table<M extends Models, T extends keyof M> {
       ", "
     )}) VALUES ${allPlaceholders.join(", ")} RETURNING *`;
 
-    console.log("Executing SQL:", sqlQuery, "with params:", allParams);
-
+    const startTime = process.hrtime.bigint();
     const result = await this.sqlClient.unsafe(sqlQuery, allParams);
+    const endTime = process.hrtime.bigint();
+    const durationMs = Number(endTime - startTime) / 1_000_000;
+    logQueryExecution(sqlQuery, durationMs);
+
     return isArray ? result : result[0];
   }
   public async upsert(options: {
@@ -785,9 +811,12 @@ ON CONFLICT (${conflictFields.join(", ")})
 DO UPDATE SET ${updateAssignments}
 RETURNING *`;
 
-    console.log("Executing SQL:", sqlQuery, "with params:", insertValues);
-
+    const startTime = process.hrtime.bigint();
     const [res] = await this.sqlClient.unsafe(sqlQuery, insertValues);
+    const endTime = process.hrtime.bigint();
+    const durationMs = Number(endTime - startTime) / 1_000_000;
+    logQueryExecution(sqlQuery, durationMs);
+
     return res;
   }
 
