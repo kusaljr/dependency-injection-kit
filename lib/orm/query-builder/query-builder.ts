@@ -321,9 +321,9 @@ class Query<
       } else {
         const pathArray = `{${currentPath.join(",")}}`;
         const placeholder = getPlaceholder(value);
-        // Cast the parameter to jsonb since it's a JSON string
+
         expressions.push(
-          `${baseField} = jsonb_set(${baseField}, '${pathArray}', ${placeholder}::jsonb, true)`
+          `${baseField} = jsonb_set(${baseField}, '${pathArray}', ${placeholder}, true)`
         );
       }
     }
