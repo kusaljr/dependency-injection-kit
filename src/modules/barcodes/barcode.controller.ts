@@ -1,22 +1,26 @@
-import { Controller, Get } from "@express-di-kit/common";
-import { Body, Param, Post, Query } from "@express-di-kit/decorators/router";
+import { Controller, Get, NotFoundException } from "@express-di-kit/common";
+import {
+  Body,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from "@express-di-kit/decorators/router";
 import { dikitDB } from "@express-di-kit/orm";
-import { BarcodeDto } from "./barcode.dto";
+import { BarcodeDto, UpdateBarcodeDto } from "./barcode.dto";
 
 @Controller("/barcodes")
 export class BarcodeController {
   @Get()
   async getBarcodeList(
-    @Query("search") search?: string,
-    @Query("is_active") isActive?: boolean,
-    @Query("limit") limit: number = 10,
-    @Query("offset") offset: number = 0
+    @Query("page") page: number = 1,
+    @Query("limit") limit: number = 10
   ) {
     const products = await dikitDB
       .table("barcode")
       .select([])
       .limit(limit)
-      .offset(offset)
+      .offset((page - 1) * limit)
       .execute();
 
     return {
@@ -48,6 +52,7 @@ export class BarcodeController {
 
   @Post()
   async createBarcode(@Body() body: BarcodeDto) {
+    console.log("Creating barcode with body:", body);
     const { code, metadata, is_active } = body;
 
     const newBarcode = await dikitDB.table("barcode").insert({
@@ -66,5 +71,28 @@ export class BarcodeController {
     return {
       data: newBarcode,
     };
+  }
+
+  @Patch("/:id")
+  async updateBarcode(@Param("id") id: number, @Body() body: UpdateBarcodeDto) {
+    const existingBarcode = await dikitDB
+      .table("barcode")
+      .select([])
+      .where({
+        "barcode.id": Number(id),
+      })
+      .execute();
+
+    if (existingBarcode.length === 0) {
+      throw new NotFoundException("Barcode with this ID does not list");
+    }
+
+    return await dikitDB
+      .table("barcode")
+      .update(body)
+      .where({
+        "barcode.id": Number(id),
+      })
+      .execute();
   }
 }

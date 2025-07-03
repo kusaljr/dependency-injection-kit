@@ -1,16 +1,41 @@
-import { IsBoolean, IsObject, IsString } from "@express-di-kit/validator";
-import { z } from "zod";
+import {
+  IsArray,
+  IsBoolean,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+} from "@express-di-kit/validator";
+import { PartialType } from "@express-di-kit/validator/decorator";
 
-interface BarcodeMetadata {
-  type: {
-    nonce: string;
-    hash: string;
-  };
-  ingredients: string[];
+class BarcodeMetadataType {
+  @IsString()
+  nonce!: string;
+
+  @IsString()
+  hash!: string;
+}
+
+class BarcodeMetadata {
+  @IsObject(BarcodeMetadataType)
+  type!: BarcodeMetadataType;
+
+  @IsArray(String, { min: 1, max: 10 })
+  ingredients!: string[];
+
+  @IsOptional()
+  @IsNumber()
   calories?: number;
+
+  @IsOptional()
+  @IsString()
   code_type?: string;
-  description: string;
-  non_vegetarian: boolean;
+
+  @IsString()
+  description!: string;
+
+  @IsBoolean()
+  non_vegetarian!: boolean;
 }
 
 export class BarcodeDto {
@@ -20,18 +45,8 @@ export class BarcodeDto {
   @IsBoolean()
   is_active?: boolean;
 
-  @IsObject(
-    z.object({
-      type: z.object({
-        nonce: z.string(),
-        hash: z.string(),
-      }),
-      ingredients: z.array(z.string()),
-      calories: z.number().optional(),
-      code_type: z.string().optional(),
-      description: z.string(),
-      non_vegetarian: z.boolean(),
-    })
-  )
+  @IsObject(BarcodeMetadata)
   metadata?: BarcodeMetadata;
 }
+
+export class UpdateBarcodeDto extends PartialType(BarcodeDto, { deep: true }) {}

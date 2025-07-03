@@ -321,33 +321,14 @@ class Query<
       } else {
         const pathArray = `{${currentPath.join(",")}}`;
         const placeholder = getPlaceholder(value);
+        // Cast the parameter to jsonb since it's a JSON string
         expressions.push(
-          `${baseField} = jsonb_set(${baseField}, '${pathArray}', ${placeholder}, true)`
+          `${baseField} = jsonb_set(${baseField}, '${pathArray}', ${placeholder}::jsonb, true)`
         );
       }
     }
 
     return expressions;
-  }
-
-  private collectJsonPaths(
-    obj: any,
-    path: string[] = []
-  ): { path: string[]; val: any }[] {
-    const results: { path: string[]; val: any }[] = [];
-
-    for (const key in obj) {
-      const value = obj[key];
-      const newPath = [...path, key];
-
-      if (typeof value === "object" && value !== null) {
-        results.push(...this.collectJsonPaths(value, newPath));
-      } else {
-        results.push({ path: newPath, val: value });
-      }
-    }
-
-    return results;
   }
 
   private _update(values: UpdateValues<M, T>): PreparedStatement {
@@ -368,32 +349,56 @@ class Query<
       const value = values[field];
 
       if (fieldType === "json" && typeof value === "object" && value !== null) {
-        // Collect all nested JSON paths
-        const jsonPaths = this.collectJsonPaths(value);
+        // For JSON fields, use buildJsonSetExpressions method
+        const getPlaceholder = (val: any) => {
+          let jsonValue = val;
 
-        for (const { path, val } of jsonPaths) {
-          if (!jsonFieldUpdates[field]) jsonFieldUpdates[field] = [];
-          jsonFieldUpdates[field].push({ path, value: val });
-        }
+          // Convert stringified numbers to real numbers
+          if (typeof jsonValue === "string" && !isNaN(Number(jsonValue))) {
+            jsonValue = Number(jsonValue);
+          }
+
+          // Push as JSON string, not the raw value
+          updateParams.push(JSON.stringify(jsonValue));
+          return `$${index++}`;
+        };
+
+        const expressions = this.buildJsonSetExpressions(
+          field,
+          value,
+          getPlaceholder
+        );
+
+        setClauses.push(...expressions);
       } else {
         setClauses.push(`${field} = $${index++}`);
-        updateParams.push(value);
+        updateParams.push(value); // Let driver handle typing
       }
     }
 
-    // Handle jsonb_set chains for each JSON field (like metadata)
     for (const jsonField in jsonFieldUpdates) {
-      const updates = jsonFieldUpdates[jsonField];
-      let expr = jsonField;
+      const originalValue = (values as Record<string, any>)[jsonField];
 
-      for (const update of updates) {
-        const pathStr = `{${update.path.join(",")}}`;
-        const paramPlaceholder = `$${index++}`;
-        expr = `jsonb_set(${expr}, '${pathStr}', ${paramPlaceholder}, true)`;
-        updateParams.push(update.value);
-      }
+      const getPlaceholder = (value: any) => {
+        let jsonValue = value;
 
-      setClauses.push(`${jsonField} = ${expr}`);
+        // Convert stringified numbers to real numbers
+        if (typeof jsonValue === "string" && !isNaN(Number(jsonValue))) {
+          jsonValue = Number(jsonValue);
+        }
+
+        // Push as JSON string, not the raw value
+        updateParams.push(JSON.stringify(jsonValue));
+        return `$${index++}`;
+      };
+
+      const expressions = this.buildJsonSetExpressions(
+        jsonField,
+        originalValue,
+        getPlaceholder
+      );
+
+      setClauses.push(...expressions);
     }
 
     if (setClauses.length === 0) {
@@ -401,7 +406,6 @@ class Query<
     }
 
     let sql = `UPDATE ${String(this.tableName)} SET ${setClauses.join(", ")}`;
-
     const whereClauses: string[] = [];
     const whereParams: any[] = [];
 
@@ -433,11 +437,10 @@ class Query<
     }
 
     sql += ` RETURNING`;
-    if (this.selectedFields.length > 0) {
-      sql += ` ${this.selectedFields.join(", ")}`;
-    } else {
-      sql += ` *`;
-    }
+    sql +=
+      this.selectedFields.length > 0
+        ? ` ${this.selectedFields.join(", ")}`
+        : ` *`;
 
     return { sql, params: [...updateParams, ...whereParams] };
   }
@@ -563,12 +566,16 @@ class Query<
 
     if (this.updateValues) {
       ({ sql: sqlString, params } = this._update(this.updateValues));
+      console.log(
+        `Executing UPDATE on table '${String(this.tableName)}' with values:`,
+        this.updateValues,
+        `\nSQL: ${sqlString}`
+      );
       res = await this.sqlClient.unsafe(sqlString, params);
     } else if (this.isDeleteOperation) {
       ({ sql: sqlString, params } = this._delete());
       res = await this.sqlClient.unsafe(sqlString, params);
     } else {
-      // Determine if it's a json_agg query
       const isJsonAggQuery = this.joins.length > 0;
 
       if (isJsonAggQuery) {

@@ -16,7 +16,7 @@ import {
   Context,
   DiKitRequest,
   DiKitResponse,
-} from "@express-di-kit/bun-engine/types"; // Import DiKitRequest
+} from "@express-di-kit/bun-engine/types";
 import {
   BadRequestException,
   HttpException,
@@ -75,7 +75,6 @@ async function processBodyAndValidate(
 
   const zodSchema = getSchema(targetClass);
   const parseResult = zodSchema.safeParse(rawBodyForZod);
-
   if (!parseResult.success) {
     console.error("Zod validation failed:", parseResult.error.issues);
     throw new ZodError(parseResult.error.issues);
@@ -151,7 +150,6 @@ export async function registerControllers(
           any
         >;
 
-        // Sort routes to prioritize static paths over dynamic paths (with params)
         routes.sort((a, b) => {
           const aHasParam = a.path.includes(":");
           const bHasParam = b.path.includes(":");
@@ -182,19 +180,16 @@ export async function registerControllers(
             route.handlerName
           );
 
-          // Generate React view file if metadata exists
           if (hasReactMetadata) {
             generateReactView(
               ControllerClass.name,
               String(route.handlerName),
               filePath,
-              prefix + route.path // Pass the original API route for display
+              prefix + route.path
             );
           }
 
-          // Define the single route handler for both JSON API and React View
           if (Object.values(HttpMethod).includes(route.method as HttpMethod)) {
-            // Retrieve regular route-specific middlewares (BunServe's Middleware type)
             const methodMiddlewares: Middleware[] =
               Reflect.getMetadata(
                 "methodMiddlewares",
@@ -202,12 +197,9 @@ export async function registerControllers(
                 route.handlerName
               ) || [];
 
-            // --- INTERCEPTOR LOGIC START ---
-            // Get class-level interceptors
             const classInterceptorsConstructors: Constructor<DiKitInterceptor>[] =
               Reflect.getMetadata(INTERCEPTOR_METADATA, ControllerClass) || [];
 
-            // Get method-level interceptors
             const methodInterceptorsConstructors: Constructor<DiKitInterceptor>[] =
               Reflect.getMetadata(
                 INTERCEPTOR_METADATA,
@@ -215,7 +207,6 @@ export async function registerControllers(
                 route.handlerName
               ) || [];
 
-            // Combine and resolve all interceptor instances
             const allInterceptorConstructors = [
               ...classInterceptorsConstructors,
               ...methodInterceptorsConstructors,
@@ -223,143 +214,122 @@ export async function registerControllers(
 
             const interceptorInstances: DiKitInterceptor[] =
               allInterceptorConstructors.map((I) => container.resolve(I));
-            // --- INTERCEPTOR LOGIC END ---
 
             const finalRouteHandler = async (ctx: Context) => {
-              const parameters: ParameterDefinition[] =
-                Reflect.getMetadata(
-                  "parameters",
-                  ControllerClass.prototype,
-                  route.handlerName
-                ) || [];
+              try {
+                const parameters: ParameterDefinition[] =
+                  Reflect.getMetadata(
+                    "parameters",
+                    ControllerClass.prototype,
+                    route.handlerName
+                  ) || [];
 
-              const args: any[] = new Array(
-                Math.max(...parameters.map((p) => p.index + 1), 0)
-              ).fill(undefined);
+                const args: any[] = new Array(
+                  Math.max(...parameters.map((p) => p.index + 1), 0)
+                ).fill(undefined);
 
-              for (const param of parameters) {
-                switch (param.type) {
-                  case ParameterType.REQ:
-                    args[param.index] = ctx.req;
-                    break;
-                  case ParameterType.RES:
-                    args[param.index] = ctx.res; // Pass ctx.res directly
-                    break;
-                  case ParameterType.PARAM:
-                    args[param.index] = ctx.params[param.name!];
-                    break;
-                  case ParameterType.QUERY:
-                    args[param.index] = ctx.query[param.name!];
-                    break;
-                  case ParameterType.BODY:
-                    const ParamType = Reflect.getMetadata(
-                      "design:paramtypes",
-                      ControllerClass.prototype,
-                      route.handlerName
-                    )?.[param.index];
-
-                    if (!ParamType) {
-                      console.warn(
-                        `Missing design:paramtypes metadata for parameter ${
-                          param.index
-                        } of ${String(route.handlerName)} in ${
-                          ControllerClass.name
-                        }. Cannot validate body.`
-                      );
-                      args[param.index] = ctx.req.body;
+                for (const param of parameters) {
+                  switch (param.type) {
+                    case ParameterType.REQ:
+                      args[param.index] = ctx.req;
                       break;
-                    }
-
-                    const zodSchema = getZodSchemaForDto(ParamType);
-
-                    if (!zodSchema) {
-                      console.warn(
-                        `No Zod schema found for DTO type ${ParamType.name}. Assigning raw body.`
-                      );
-                      args[param.index] = ctx.req.body;
+                    case ParameterType.RES:
+                      args[param.index] = ctx.res;
                       break;
-                    }
+                    case ParameterType.PARAM:
+                      args[param.index] = ctx.params[param.name!];
+                      break;
+                    case ParameterType.QUERY:
+                      args[param.index] = ctx.query[param.name!];
+                      break;
+                    case ParameterType.BODY:
+                      const ParamType = Reflect.getMetadata(
+                        "design:paramtypes",
+                        ControllerClass.prototype,
+                        route.handlerName
+                      )?.[param.index];
 
-                    try {
+                      if (!ParamType) {
+                        console.warn(
+                          `Missing design:paramtypes metadata for parameter ${
+                            param.index
+                          } of ${String(route.handlerName)} in ${
+                            ControllerClass.name
+                          }. Cannot validate body.`
+                        );
+                        args[param.index] = ctx.req.body;
+                        break;
+                      }
+
+                      const zodSchema = getZodSchemaForDto(ParamType);
+                      if (!zodSchema) {
+                        console.warn(
+                          `No Zod schema found for DTO type ${ParamType.name}. Assigning raw body.`
+                        );
+                        args[param.index] = ctx.req.body;
+                        break;
+                      }
+
                       const newParsedResult = await processBodyAndValidate(
                         ctx,
                         ParamType
                       );
                       args[param.index] = newParsedResult;
-                    } catch (error) {
-                      if (error instanceof ZodError) {
-                        if (!ctx.res.headersSent()) {
-                          // Use ctx.res
-                          ctx.res.status(422).json({
-                            message: "Validation failed",
-                            errors: error.issues,
-                          });
-                        }
-                        return;
-                      } else {
-                        throw error;
-                      }
-                    }
-
-                    break;
-                  default:
-                    break;
+                      break;
+                    default:
+                      break;
+                  }
                 }
-              }
 
-              // --- INTERCEPTOR CHAIN EXECUTION ---
-              const createCallHandler = (index: number): CallHandler => {
-                return {
-                  handle: async () => {
-                    if (index < interceptorInstances.length) {
-                      const currentInterceptor = interceptorInstances[index];
-                      const executionContext: ExecutionContext = {
-                        getType: () => "http",
-                        switchToHttp: () => ({
-                          getRequest: () => ctx.req,
-                          getResponse: () => ctx.res, // Pass ctx.res here
-                        }),
-                        getHandler: () => originalControllerMethod,
-                        getClass: () => ControllerClass,
-                      };
-                      return currentInterceptor.intercept(
-                        executionContext,
-                        createCallHandler(index + 1)
-                      );
-                    } else {
-                      return originalControllerMethod.apply(instance, args);
-                    }
-                  },
+                const createCallHandler = (index: number): CallHandler => {
+                  return {
+                    handle: async () => {
+                      if (index < interceptorInstances.length) {
+                        const currentInterceptor = interceptorInstances[index];
+                        const executionContext: ExecutionContext = {
+                          getType: () => "http",
+                          switchToHttp: () => ({
+                            getRequest: () => ctx.req,
+                            getResponse: () => ctx.res,
+                          }),
+                          getHandler: () => originalControllerMethod,
+                          getClass: () => ControllerClass,
+                        };
+                        return currentInterceptor.intercept(
+                          executionContext,
+                          createCallHandler(index + 1)
+                        );
+                      } else {
+                        return originalControllerMethod.apply(instance, args);
+                      }
+                    },
+                  };
                 };
-              };
 
-              let resultFromInterceptors: any;
-              try {
-                resultFromInterceptors = await createCallHandler(0).handle();
+                const resultFromInterceptors = await createCallHandler(
+                  0
+                ).handle();
 
                 if (hasReactMetadata) {
                   const handler = String(route.handlerName);
                   const jsFileName = `${ControllerClass.name}.${handler}.entry.js`;
-
                   const props = ctx.body || resultFromInterceptors;
                   const seoMeta = resultFromInterceptors?.head;
-
                   const html = generateDynamicHtml(jsFileName, props, seoMeta);
 
                   if (!ctx.res.headersSent()) {
-                    // Use ctx.res
                     ctx.res.setHeader(
                       "Content-Type",
                       "text/html; charset=utf-8"
-                    ); // Use ctx.res
-                    ctx.res.send(html); // Use ctx.res
+                    );
+                    ctx.res.send(html);
                   }
                 } else {
                   if (
                     resultFromInterceptors !== undefined &&
-                    !ctx.res.headersSent() // Use ctx.res
+                    !ctx.res.headersSent()
                   ) {
-                    ctx.res.json(resultFromInterceptors); // Use ctx.res
+                    ctx.res.json(resultFromInterceptors);
                   }
                 }
               } catch (error) {
@@ -369,23 +339,24 @@ export async function registerControllers(
                   }:`,
                   error
                 );
-                if (error instanceof HttpException) {
-                  if (!ctx.res.headersSent()) {
-                    // Use ctx.res
-                    ctx.res.status(error.status).json(error.toJson()); // Use ctx.res
-                  }
+
+                if (ctx.res.headersSent()) {
+                  return;
+                }
+
+                if (error instanceof ZodError) {
+                  ctx.res.status(422).json({
+                    message: "Validation failed",
+                    errors: error.issues,
+                  });
+                } else if (error instanceof HttpException) {
+                  ctx.res.status(error.status).json(error.toJson());
                 } else {
-                  if (!ctx.res.headersSent()) {
-                    // Use ctx.res
-                    ctx.res
-                      .status(500)
-                      .json({ error: "Internal Server Error" }); // Use ctx.res
-                  }
+                  ctx.res.status(500).json({ error: "Internal Server Error" });
                 }
               }
             };
 
-            // Retrieve guard constructors
             const classGuards: (new () => CanActivate)[] =
               Reflect.getMetadata("classGuards", ControllerClass) || [];
             const methodGuards: (new () => CanActivate)[] =
@@ -395,11 +366,10 @@ export async function registerControllers(
                 route.handlerName
               ) || [];
 
-            // Define the Express-style guard middleware function
             const expressStyleGuardMiddleware = async (
-              req: DiKitRequest, // FIX HERE: Corrected to DiKitRequest
-              res: DiKitResponse, // This is already DiKitResponse
-              next: () => void // The Express-style next callback
+              req: DiKitRequest,
+              res: DiKitResponse,
+              next: () => void
             ) => {
               try {
                 const guardClasses = [...classGuards, ...methodGuards];
@@ -416,7 +386,6 @@ export async function registerControllers(
                   return;
                 }
 
-                // If guards pass, proceed to the next middleware/handler in the BunServe chain
                 next();
               } catch (err: any) {
                 console.error(
@@ -427,29 +396,24 @@ export async function registerControllers(
                 );
 
                 if (!res.headersSent()) {
-                  // Use res.headersSent() from DiKitResponse
                   if (err instanceof HttpException) {
                     res.status(err.status).json(err.toJson());
                   } else {
                     res.status(500).json({ message: "Guard internal error." });
                   }
                 }
-                // No `next()` call here, as an error occurred and a response was sent.
               }
             };
 
-            // --- IMPORTANT: Wrap the Express-style guard middleware for BunServe ---
             const bunServeGuardMiddleware: Middleware = wrapExpressMiddleware(
               expressStyleGuardMiddleware
             );
 
-            // Register the route with BunServe
-            // The order is important: global -> method-specific BunServe middlewares -> wrapped guards -> final handler
             app[route.method.toLowerCase() as keyof BunServe](
               (prefix + route.path) as any,
-              ...methodMiddlewares, // Regular BunServe specific middlewares
-              bunServeGuardMiddleware, // The wrapped guard middleware
-              finalRouteHandler // Your final handler which now runs the interceptor chain
+              ...methodMiddlewares,
+              bunServeGuardMiddleware,
+              finalRouteHandler
             );
 
             console.log(
