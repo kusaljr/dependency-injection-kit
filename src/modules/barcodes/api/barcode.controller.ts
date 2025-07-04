@@ -7,8 +7,8 @@ import {
   Post,
   Query,
 } from "@express-di-kit/decorators/router";
-import { BarcodeDto, UpdateBarcodeDto } from "./barcode.dto";
-import { BarcodeService } from "./barcode.service";
+import { BarcodeDto, UpdateBarcodeDto } from "../dto/barcode.dto";
+import { BarcodeService } from "../services/barcode.service";
 
 @Controller("/barcodes")
 export class BarcodeController {

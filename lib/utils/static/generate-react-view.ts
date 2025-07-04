@@ -43,6 +43,8 @@ export default function ${componentName}({props}:{props: any}) {
 }
 `.trim();
 
+  console.log(tsxFileName, tsxFilePath);
+
   fs.writeFileSync(tsxFilePath, template, "utf8");
   console.log(`✅ Generated React view: ${tsxFileName}`);
 }

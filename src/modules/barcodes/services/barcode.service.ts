@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from "@express-di-kit/common";
 import { dikitDB } from "@express-di-kit/orm";
-import { BarcodeDto, UpdateBarcodeDto } from "./barcode.dto";
+import { BarcodeDto, UpdateBarcodeDto } from "../dto/barcode.dto";
 
 @Injectable()
 export class BarcodeService {
