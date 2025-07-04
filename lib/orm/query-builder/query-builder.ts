@@ -292,7 +292,7 @@ class Query<
     );
   }
 
-  buildJsonSetExpressions(
+  private buildJsonSetExpressions(
     baseField: string,
     nestedObj: any,
     getPlaceholder: (value: any) => string,
@@ -331,81 +331,55 @@ class Query<
     return expressions;
   }
 
+  /**
+   * UPDATE generator that keeps JSON numbers as numbers.
+   */
   private _update(values: UpdateValues<M, T>): PreparedStatement {
     const setClauses: string[] = [];
     const updateParams: any[] = [];
     let index = 1;
 
-    // Track JSON updates by field
-    const jsonFieldUpdates: Record<string, { path: string[]; value: any }[]> =
-      {};
+    const makePlaceholder = (val: any): string => {
+      // Treat strings that look like numbers as real numbers
+      if (typeof val === "string" && !isNaN(Number(val))) {
+        val = Number(val);
+      }
 
+      /** ── object / array ──────────────────────────────── */
+      if (val !== null && typeof val === "object") {
+        // Send a JSON string and cast it
+        updateParams.push(JSON.stringify(val));
+        return `$${index++}::jsonb`;
+      }
+
+      /** ── primitive value ─────────────────────────────── */
+      updateParams.push(val); // number | boolean | null | string
+      return `to_jsonb($${index++})`; // let PG decide the JSON type
+    };
+
+    /* ---------- SET clause ------------------------------------------------ */
     for (const field in values) {
       if (!Object.prototype.hasOwnProperty.call(values, field)) continue;
 
       const modelDef = this.modelsDef[this.tableName as keyof Models];
       const fieldType = (modelDef as any)?.[field];
-
       const value = values[field];
 
       if (fieldType === "json" && typeof value === "object" && value !== null) {
-        // For JSON fields, use buildJsonSetExpressions method
-        const getPlaceholder = (val: any) => {
-          let jsonValue = val;
-
-          // Convert stringified numbers to real numbers
-          if (typeof jsonValue === "string" && !isNaN(Number(jsonValue))) {
-            jsonValue = Number(jsonValue);
-          }
-
-          // Push as JSON string, not the raw value
-          updateParams.push(JSON.stringify(jsonValue));
-          return `$${index++}`;
-        };
-
-        const expressions = this.buildJsonSetExpressions(
-          field,
-          value,
-          getPlaceholder
+        setClauses.push(
+          ...this.buildJsonSetExpressions(field, value, makePlaceholder)
         );
-
-        setClauses.push(...expressions);
       } else {
         setClauses.push(`${field} = $${index++}`);
-        updateParams.push(value); // Let driver handle typing
+        updateParams.push(value);
       }
-    }
-
-    for (const jsonField in jsonFieldUpdates) {
-      const originalValue = (values as Record<string, any>)[jsonField];
-
-      const getPlaceholder = (value: any) => {
-        let jsonValue = value;
-
-        // Convert stringified numbers to real numbers
-        if (typeof jsonValue === "string" && !isNaN(Number(jsonValue))) {
-          jsonValue = Number(jsonValue);
-        }
-
-        // Push as JSON string, not the raw value
-        updateParams.push(JSON.stringify(jsonValue));
-        return `$${index++}`;
-      };
-
-      const expressions = this.buildJsonSetExpressions(
-        jsonField,
-        originalValue,
-        getPlaceholder
-      );
-
-      setClauses.push(...expressions);
     }
 
     if (setClauses.length === 0) {
       throw new Error("No values provided for update.");
     }
 
-    let sql = `UPDATE ${String(this.tableName)} SET ${setClauses.join(", ")}`;
+    /* ---------- WHERE clause (unchanged) ---------------------------------- */
     const whereClauses: string[] = [];
     const whereParams: any[] = [];
 
@@ -426,21 +400,21 @@ class Query<
       }
     }
 
-    if (whereClauses.length > 0) {
+    /* ---------- final SQL -------------------------------------------------- */
+    let sql = `UPDATE ${String(this.tableName)} SET ${setClauses.join(", ")}`;
+
+    if (whereClauses.length) {
       sql += ` WHERE ${whereClauses.join(" AND ")}`;
     } else {
       console.warn(
-        `WARNING: UPDATE statement for table '${String(
-          this.tableName
-        )}' has no WHERE clause. All rows will be updated.`
+        `WARNING: UPDATE on '${String(this.tableName)}' has no WHERE clause.`
       );
     }
 
-    sql += ` RETURNING`;
-    sql +=
-      this.selectedFields.length > 0
-        ? ` ${this.selectedFields.join(", ")}`
-        : ` *`;
+    sql += " RETURNING";
+    sql += this.selectedFields.length
+      ? ` ${this.selectedFields.join(", ")}`
+      : " *";
 
     return { sql, params: [...updateParams, ...whereParams] };
   }
@@ -562,15 +536,10 @@ class Query<
     let params: any[];
     let res: any;
 
-    const startTime = process.hrtime.bigint(); // High-resolution time
+    const startTime = process.hrtime.bigint();
 
     if (this.updateValues) {
       ({ sql: sqlString, params } = this._update(this.updateValues));
-      console.log(
-        `Executing UPDATE on table '${String(this.tableName)}' with values:`,
-        this.updateValues,
-        `\nSQL: ${sqlString}`
-      );
       res = await this.sqlClient.unsafe(sqlString, params);
     } else if (this.isDeleteOperation) {
       ({ sql: sqlString, params } = this._delete());
