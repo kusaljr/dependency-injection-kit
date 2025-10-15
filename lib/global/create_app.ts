@@ -34,7 +34,9 @@ export interface AppConfig {
 }
 
 export async function createApp(config: AppConfig) {
-  const app = new BunServe();
+  const app = new BunServe({
+    port: config.port,
+  });
   const container = Container.getInstance();
 
   generateEnvConfig(config.envSchema);

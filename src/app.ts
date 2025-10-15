@@ -3,7 +3,7 @@ import { z } from "zod";
 
 async function bootstrap() {
   const appConfig = {
-    port: 3000,
+    port: 3009,
     swaggerOptions: {
       title: "My Test API",
       version: "1.0.0",
