@@ -169,3 +169,8 @@ export class ExampleController {
 This library provides a simple Object Relational Mapping (ORM) system for managing database interactions in a your application. It allows you to define models that map to database tables, perform CRUD operations, and manage relationships between models.
 
 For documentation on how to use the ORM, please refer to the [ORM documentation](./lib/orm/README.md).
+
+
+## WebSocket Integration
+The library includes support for WebSocket integration, allowing you to easily create real-time applications. You can define WebSocket gateways and handle events using decorators.
+For documentation on how to use WebSocket integration, please refer to the [WebSocket documentation](./lib/socket/README.md).
