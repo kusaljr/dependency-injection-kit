@@ -1,13 +1,18 @@
 import { createApp } from "@express-di-kit/common";
+import { AppConfig } from "@express-di-kit/global/create_app";
 import { z } from "zod";
 
 async function bootstrap() {
-  const appConfig = {
+  const appConfig: AppConfig = {
     port: 3009,
     swaggerOptions: {
       title: "My Test API",
       version: "1.0.0",
       description: "API documentation for my application",
+    },
+    asyncApiOptions: {
+      title: "Socket Documentation",
+      description: "WebSocket API documentation",
     },
 
     envSchema: z.object({

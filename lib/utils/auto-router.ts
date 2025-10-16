@@ -17,10 +17,7 @@ import {
   DiKitRequest,
   DiKitResponse,
 } from "@express-di-kit/bun-engine/types";
-import {
-  BadRequestException,
-  HttpException,
-} from "@express-di-kit/common/exceptions";
+import { HttpException } from "@express-di-kit/common/exceptions";
 import { CanActivate, evaluateGuards } from "@express-di-kit/common/middleware";
 import {
   CallHandler,
@@ -29,7 +26,6 @@ import {
   INTERCEPTOR_METADATA,
 } from "@express-di-kit/global/interceptor";
 import { WebSocketServer } from "@express-di-kit/socket/web-socket";
-import { getSchema } from "@express-di-kit/validator/decorator";
 import * as fs from "fs";
 import * as path from "path";
 import { ZodError } from "zod";
@@ -39,49 +35,7 @@ import { getZodSchemaForDto } from "../validator/utils";
 import { colorMethod, colorText } from "./colors";
 import { generateDynamicHtml } from "./static/generate-dynamic-html";
 import { generateReactView } from "./static/generate-react-view";
-
-async function processBodyAndValidate(
-  ctx: Context,
-  targetClass: any
-): Promise<any> {
-  const incomingBody = ctx.req.body;
-
-  if (!(incomingBody instanceof FormData)) {
-    if (typeof incomingBody === "object" && incomingBody !== null) {
-      const zodSchema = getSchema(targetClass);
-      const parseResult = zodSchema.safeParse(incomingBody);
-
-      if (!parseResult.success) {
-        throw new ZodError(parseResult.error.issues);
-      }
-      return parseResult.data;
-    }
-
-    throw new BadRequestException("Unsupported body format for validation.");
-  }
-
-  const rawBodyForZod: Record<string, any> = {};
-  for (const [key, value] of incomingBody.entries()) {
-    if (key in rawBodyForZod) {
-      if (Array.isArray(rawBodyForZod[key])) {
-        rawBodyForZod[key].push(value);
-      } else {
-        rawBodyForZod[key] = [rawBodyForZod[key], value];
-      }
-    } else {
-      rawBodyForZod[key] = value;
-    }
-  }
-
-  const zodSchema = getSchema(targetClass);
-  const parseResult = zodSchema.safeParse(rawBodyForZod);
-  if (!parseResult.success) {
-    console.error("Zod validation failed:", parseResult.error.issues);
-    throw new ZodError(parseResult.error.issues);
-  }
-
-  return parseResult.data;
-}
+import { processBodyAndValidate } from "./validate";
 
 function findGatewayFiles(dir: string): string[] {
   let gatewayFiles: string[] = [];

@@ -57,6 +57,10 @@ export async function createApp(config: AppConfig) {
       controllersDirectory
     );
 
+    console.log(
+      `Found ${socketControllerClasses.length} WebSocket controllers for AsyncAPI documentation.`
+    );
+
     const asyncAPIDocument = generateAsyncAPIDoc(socketControllerClasses, {
       title,
       version,
