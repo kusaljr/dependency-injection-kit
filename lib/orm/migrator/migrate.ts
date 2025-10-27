@@ -48,5 +48,6 @@ export async function migrate(ast: SchemaNode) {
     }
   } catch (err) {
     console.error("❌ Failed to apply migration:", err);
+    throw err;
   }
 }

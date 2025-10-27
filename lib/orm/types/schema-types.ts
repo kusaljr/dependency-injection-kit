@@ -13,12 +13,23 @@ export type barcode = {
     ingredients: string[]
     calories?: number  
     code_type?: string };
+  product_id : number;
+  product? : product;
   created_at? : string;
   updated_at? : string;
 };
 
-export type ModelNames = "barcode";
+export type product = {
+  id? : number;
+  name : string;
+  description? : string;
+  price : number;
+  barcodes? : barcode;
+};
+
+export type ModelNames = "barcode" | "product";
 
 export type Models = {
   barcode: barcode;
+  product: product;
 };

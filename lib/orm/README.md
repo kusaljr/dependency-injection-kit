@@ -161,3 +161,10 @@ await dikitDb.transaction(async (trx) => {
 });
 ```
 
+
+### Visualizer
+A database visualizer tool is included to help visualize the database schema. You can run the visualizer using the following command:
+```bash
+npm run orm:visualize
+```
+This will generate a visual representation of the database schema, showing the tables and their relationships.

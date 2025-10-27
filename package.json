@@ -8,7 +8,8 @@
     "start:app": "ts-node src/app.ts",
     "orm": "bun run lib/orm",
     "orm:migrate": "bun run lib/orm/exec/migrate.ts",
-    "dev": "bun run lib/utils/generate-injection.ts && bun run lib/utils/static/build-react-views.ts && bun run lib/utils/static/generate-react-view.ts && bun run src/app.ts"
+    "dev": "bun run lib/utils/generate-injection.ts && bun run lib/utils/static/build-react-views.ts && bun run lib/utils/static/generate-react-view.ts && bun run src/app.ts",
+    "orm:visualize": "bun run lib/orm/database-visualizer.ts"
   },
   "keywords": [],
   "author": "",
@@ -24,6 +25,7 @@
     "@types/ws": "^8.18.1",
     "chokidar-cli": "^3.0.0",
     "jest": "^29.7.0",
+    "pg-structure": "^7.15.3",
     "ts-jest": "^29.3.4",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",

@@ -60,7 +60,9 @@ export class SqlGenerator {
     const statements: string[] = [];
 
     if (!previousSchema) {
-      this.ast.models.forEach((model) => {
+      console.log("🔍 Sorting tables by dependency order...");
+      const orderedModels = this.sortModelsByDependencies(this.ast.models);
+      orderedModels.forEach((model) => {
         statements.push(this.generateCreateTable(model));
       });
     } else {
@@ -74,6 +76,49 @@ export class SqlGenerator {
     }
 
     return `BEGIN;\n${statements.join("\n")}\nCOMMIT;`;
+  }
+
+  /**
+   * Automatically sorts models so that referenced tables come first.
+   */
+  private sortModelsByDependencies(models: ModelNode[]): ModelNode[] {
+    const graph = new Map<string, Set<string>>();
+
+    // Build dependency graph
+    for (const model of models) {
+      const deps = new Set<string>();
+      for (const field of model.fields) {
+        const fkTarget = field.relation?.foreignKey ? field.fieldType : null;
+        if (fkTarget) deps.add(fkTarget);
+      }
+      graph.set(model.name, deps);
+    }
+
+    // Topological sort
+    const sorted: string[] = [];
+    const visited = new Set<string>();
+
+    const visit = (name: string, stack: Set<string>) => {
+      if (visited.has(name)) return;
+      if (stack.has(name)) {
+        console.warn(`⚠️ Circular reference detected involving ${name}`);
+        return; // prevent infinite loop
+      }
+      stack.add(name);
+      for (const dep of graph.get(name) || []) {
+        if (graph.has(dep)) visit(dep, stack);
+      }
+      stack.delete(name);
+      visited.add(name);
+      sorted.push(name);
+    };
+
+    for (const name of graph.keys()) {
+      visit(name, new Set());
+    }
+
+    // Return sorted models (dependencies first)
+    return sorted.map((n) => models.find((m) => m.name === n)!);
   }
 
   private generateMigrationStatements(
@@ -126,7 +171,6 @@ export class SqlGenerator {
 
     for (const prevField of prevModel.fields) {
       if (!this.isRealColumn(prevField)) continue;
-
       if (!currModel.fields.find((f) => f.name === prevField.name)) {
         stmts.push(
           `ALTER TABLE ${currModel.name} DROP COLUMN ${prevField.name};`
@@ -193,6 +237,7 @@ export class SqlGenerator {
       }
     }
 
+    // Type change
     if (currField.fieldType !== prevField.fieldType) {
       const sqlType = this.mapFieldTypeToSql(currField.fieldType);
       if (sqlType) {
@@ -205,13 +250,13 @@ export class SqlGenerator {
       }
     }
 
-    // Unique change (single column)
+    // Unique constraint change
     if (prevField.isUnique !== currField.isUnique) {
       if (currField.isUnique) {
         stmts.push(`ALTER TABLE ${tableName} ADD UNIQUE (${currField.name});`);
       } else {
         stmts.push(
-          `-- WARNING: UNIQUE constraint removal for ${currField.name} not automated. Please drop constraint manually if needed.`
+          `-- WARNING: UNIQUE constraint removal for ${currField.name} not automated.`
         );
       }
     }
@@ -252,20 +297,16 @@ export class SqlGenerator {
     let sqlType = this.mapFieldTypeToSql(field.fieldType);
     if (!sqlType) throw new Error(`No SQL type for ${field.fieldType}`);
 
-    // Handle json[]
+    // Handle json arrays
     if (field.fieldType === "json" && field.jsonTypeDefinition?.isArray) {
-      // Instead of making a PostgreSQL jsonb[] array, just keep as jsonb
       switch (this.dialect) {
         case "postgresql":
-          // Override to plain JSONB (no array)
           sqlType = "JSONB";
           break;
         case "mysql":
-          // MySQL stores JSON as JSON type anyway, no array support
           sqlType = "JSON";
           break;
         case "sqlite":
-          // SQLite uses TEXT for JSON
           sqlType = "TEXT";
           break;
         default:

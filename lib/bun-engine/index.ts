@@ -979,7 +979,3 @@ export class BunServe {
     );
   }
 }
-
-// Ensure Bun.hash is available if used, or polyfill/remove if targeting non-Bun environments
-// If using Node.js, you'd replace Bun.file/Bun.serve/Bun.hash with Node.js equivalents.
-// For example, for crypto.createHash for etag, fs for file operations, http/https for server.

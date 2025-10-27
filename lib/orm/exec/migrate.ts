@@ -7,6 +7,8 @@ migrate(ast as SchemaNode)
     console.log("\n✅ Migration completed successfully.");
   })
   .catch((err) => {
-    console.error("\n❌ Migration failed:", err);
+    console.error(
+      "\n❌ Migration failed, exiting with error. Please check logs."
+    );
     process.exit(1);
   });
