@@ -61,39 +61,138 @@ export class SqlGenerator {
 
     if (!previousSchema) {
       console.log("🔍 Sorting tables by dependency order...");
+
       const orderedModels = this.sortModelsByDependencies(this.ast.models);
+
+      // 1. Create standard tables
       orderedModels.forEach((model) => {
         statements.push(this.generateCreateTable(model));
       });
+
+      // 2. Create Many-to-Many Join Tables (Must be done after models exist)
+      statements.push(...this.generateJoinTables(this.ast.models));
     } else {
       statements.push(
         ...this.generateMigrationStatements(previousSchema, this.ast)
       );
+      // Note: Handling M:N migrations (adding/removing join tables)
+      // requires more complex diffing logic not included in this snippet.
     }
 
     if (statements.length === 0) {
       return "-- No changes detected.";
     }
 
+    console.log("🛠 Generated migration statements:");
+    statements.forEach((stmt) => console.log(stmt));
+
+    // throw new Error("Migration generation not wrapped in transaction yet.");
     return `BEGIN;\n${statements.join("\n")}\nCOMMIT;`;
   }
 
   /**
-   * Automatically sorts models so that referenced tables come first.
+   * Generates join tables for many-to-many relationships.
+   * Handles deduplication so we don't create the table twice.
    */
+  private generateJoinTables(models: ModelNode[]): string[] {
+    const statements: string[] = [];
+    const processedPairs = new Set<string>();
+
+    for (const model of models) {
+      for (const field of model.fields) {
+        if (field.relation?.type === "many_to_many") {
+          const modelA = model.name;
+          const modelB = field.fieldType; // The target model name
+
+          // Sort to create a unique key for this pair (e.g., "Post_User")
+          // This prevents processing "User -> Post" and "Post -> User" separately.
+          const sortedNames = [modelA, modelB].sort();
+          const pairKey = sortedNames.join("_");
+
+          if (processedPairs.has(pairKey)) {
+            continue;
+          }
+          processedPairs.add(pairKey);
+
+          // Determine Join Table Name
+          // Use explicit name if provided in @many_to_many("Name"), else generic
+          const tableName = field.relation.foreignKey || `_${pairKey}`;
+
+          statements.push(
+            this.createJoinTableSql(tableName, sortedNames[0], sortedNames[1])
+          );
+        }
+      }
+    }
+    return statements;
+  }
+
+  private createJoinTableSql(
+    tableName: string,
+    modelA: string,
+    modelB: string
+  ): string {
+    const pkA = this.getPrimaryKeyField(modelA);
+    const pkB = this.getPrimaryKeyField(modelB);
+
+    if (!pkA || !pkB) {
+      throw new Error(
+        `Cannot create M:N relation for ${modelA}-${modelB}: Both models must have a Primary Key.`
+      );
+    }
+
+    const typeA = this.mapFieldTypeToSql(pkA.fieldType);
+    const typeB = this.mapFieldTypeToSql(pkB.fieldType);
+
+    // Remove SERIAL/AUTO_INCREMENT logic from types, we just want the raw type (e.g., INTEGER)
+    const rawTypeA = this.sanitizeTypeForForeignKey(typeA!);
+    const rawTypeB = this.sanitizeTypeForForeignKey(typeB!);
+
+    // Naming convention: "A_id", "B_id"
+    const colA = `${"A"}_${pkA.name}`;
+    const colB = `${"B"}_${pkB.name}`;
+
+    return `CREATE TABLE ${tableName} (
+  ${colA} ${rawTypeA} NOT NULL,
+  ${colB} ${rawTypeB} NOT NULL,
+  FOREIGN KEY (${colA}) REFERENCES ${modelA}(${pkA.name}) ON DELETE CASCADE,
+  FOREIGN KEY (${colB}) REFERENCES ${modelB}(${pkB.name}) ON DELETE CASCADE,
+  UNIQUE (${colA}, ${colB})
+);`;
+  }
+
+  private getPrimaryKeyField(modelName: string): FieldNode | undefined {
+    const model = this.ast.models.find((m) => m.name === modelName);
+    return model?.fields.find((f) => f.isPrimaryKey);
+  }
+
+  private sanitizeTypeForForeignKey(sqlType: string): string {
+    // If the PK is SERIAL (Postgres), the FK should be INTEGER.
+    // If PK is INT AUTO_INCREMENT (MySQL), FK should be INT.
+    if (sqlType.includes("SERIAL")) return "INTEGER";
+    return sqlType
+      .replace("AUTO_INCREMENT", "")
+      .replace("AUTOINCREMENT", "")
+      .trim();
+  }
+
+  // ... (Keep sortModelsByDependencies, generateMigrationStatements, generateAlterTable, etc.) ...
+
   private sortModelsByDependencies(models: ModelNode[]): ModelNode[] {
     const graph = new Map<string, Set<string>>();
-
-    // Build dependency graph
     for (const model of models) {
       const deps = new Set<string>();
       for (const field of model.fields) {
-        const fkTarget = field.relation?.foreignKey ? field.fieldType : null;
-        if (fkTarget) deps.add(fkTarget);
+        // Only consider actual FK columns (Many-to-One), ignore M:N for sorting
+        if (field.relation && field.relation.type !== "many_to_many") {
+          const fkTarget = field.relation.foreignKey ? field.fieldType : null;
+          if (fkTarget) deps.add(fkTarget);
+        }
       }
       graph.set(model.name, deps);
     }
 
+    // ... (Rest of topological sort logic remains the same)
     // Topological sort
     const sorted: string[] = [];
     const visited = new Set<string>();
@@ -102,7 +201,7 @@ export class SqlGenerator {
       if (visited.has(name)) return;
       if (stack.has(name)) {
         console.warn(`⚠️ Circular reference detected involving ${name}`);
-        return; // prevent infinite loop
+        return;
       }
       stack.add(name);
       for (const dep of graph.get(name) || []) {
@@ -117,10 +216,12 @@ export class SqlGenerator {
       visit(name, new Set());
     }
 
-    // Return sorted models (dependencies first)
     return sorted.map((n) => models.find((m) => m.name === n)!);
   }
 
+  // ... (Keep generateMigrationStatements, generateAlterTable, generateColumnAlterStatements) ...
+
+  // (Paste generateMigrationStatements, generateAlterTable, generateColumnAlterStatements here unchanged)
   private generateMigrationStatements(
     prev: SchemaNode,
     curr: SchemaNode
@@ -281,7 +382,12 @@ export class SqlGenerator {
     }
 
     model.fields.forEach((field) => {
-      if (field.relation?.foreignKey) {
+      // Logic update: Only generate standard FK constraints for One-to-Many or One-to-One
+      // Many-to-Many uses a separate table, handled in generateJoinTables
+      if (
+        field.relation?.foreignKey &&
+        field.relation.type !== "many_to_many"
+      ) {
         constraints.push(
           `FOREIGN KEY (${field.relation.foreignKey}) REFERENCES ${field.fieldType}(id)`
         );
@@ -294,6 +400,7 @@ export class SqlGenerator {
   }
 
   private generateColumnDefinition(field: FieldNode): string {
+    // ... (Existing column def logic remains valid)
     let sqlType = this.mapFieldTypeToSql(field.fieldType);
     if (!sqlType) throw new Error(`No SQL type for ${field.fieldType}`);
 
@@ -398,6 +505,10 @@ export class SqlGenerator {
   }
 
   private isRealColumn(field: FieldNode): boolean {
+    // If it's a many-to-many field, it is NOT a real column in the main table
+    // It exists only in the Join Table.
+    if (field.relation?.type === "many_to_many") return false;
+
     return TYPE_MAPPINGS[field.fieldType] !== undefined;
   }
 }

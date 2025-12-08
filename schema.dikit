@@ -17,11 +17,22 @@ model barcode {
     code_type?: string  
   }
 
-  product_id int @required
-  product product @many_to_one(product_id)
+  product_id int @unique
+  product product @one_to_one(product_id)
 
   created_at datetime @default(now()) 
   updated_at datetime 
+}
+
+model brand {
+  id int @primary_key @default(autoincrement())
+  name string @unique @required
+  description string
+
+  products product[] @one_to_many
+
+  created_at datetime @default(now()) 
+  updated_at datetime
 }
 
 
@@ -31,6 +42,24 @@ model product {
   description string
   price float @required
 
-  barcodes barcode @one_to_many
-  
+  barcode barcode @one_to_one
+
+  brand_id int 
+  brand brand @many_to_one(brand_id)
+
+  categories category[] @many_to_many
+
+  created_at datetime @default(now()) 
+  updated_at datetime
+}
+
+model category {
+  id int @primary_key @default(autoincrement())
+  name string @unique @required
+  description string
+
+  products product[] @many_to_many
+
+  created_at datetime @default(now()) 
+  updated_at datetime
 }

@@ -289,7 +289,11 @@ export class Parser {
         "Expected decorator name"
       ).value;
 
-      if (["one_to_many", "many_to_one", "one_to_one"].includes(decoName)) {
+      if (
+        ["one_to_many", "many_to_one", "one_to_one", "many_to_many"].includes(
+          decoName
+        )
+      ) {
         let foreignKey: string | undefined;
         if (this.peek().type === TokenType.LPAREN) {
           this.advance();

@@ -98,7 +98,7 @@ model profile {
   id int
   bio string
   user_id int
-  user user @many_to_one(user_id)
+  user user @one_to_one(user_id)
 }
 
 ```
