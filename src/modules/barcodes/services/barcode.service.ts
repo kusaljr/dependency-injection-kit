@@ -7,6 +7,7 @@ export class BarcodeService {
   constructor() {}
 
   async getBarcodeList(limit: number, page: number) {
+    const count = await dikitDB.table("barcode").where({}).count().execute();
     const products = await dikitDB
       .table("barcode")
       .select([])
@@ -16,6 +17,11 @@ export class BarcodeService {
 
     return {
       data: products,
+      meta: {
+        total: count[0]?.count || 0,
+        page,
+        limit,
+      },
     };
   }
 

@@ -144,6 +144,72 @@ class Query<
     this.modelsDef = modelsDef; // Initialized modelsDef
   }
 
+  public count(): Query<M, T, "count", JT> {
+    if (this.updateValues || this.isDeleteOperation) {
+      throw new Error("COUNT cannot be used with update() or delete().");
+    }
+
+    // Create the SQL query for counting rows
+    let sqlString = `SELECT COUNT(*) AS count FROM ${String(this.tableName)}`;
+    let params: any[] = [];
+
+    // Apply joins
+    this.joins.forEach((join) => {
+      sqlString += ` ${join.type.toUpperCase()} JOIN ${String(
+        join.target
+      )} ON ${join.on}`;
+    });
+
+    // Apply conditions (where clause)
+    const whereClauses: string[] = [];
+    for (const conditionKey in this.conditions) {
+      if (this.conditions.hasOwnProperty(conditionKey)) {
+        // Extract table alias and field name from the conditionKey
+        const [tableAlias, fieldName] = conditionKey.split(".");
+        const modelDef = this.modelsDef[tableAlias as keyof Models];
+
+        if (modelDef && (modelDef as any)[fieldName] === "json") {
+          whereClauses.push(`${conditionKey} @> $${params.length + 1}`);
+          const jsonValue = (this.conditions as any)[conditionKey];
+          params.push(jsonValue);
+        } else {
+          whereClauses.push(`${conditionKey} = $${params.length + 1}`);
+          params.push((this.conditions as any)[conditionKey]);
+        }
+      }
+    }
+
+    if (whereClauses.length > 0) {
+      sqlString += ` WHERE ${whereClauses.join(" AND ")}`;
+    }
+
+    // Apply limit and offset (if applicable)
+    if (this.limitValue !== null) {
+      sqlString += ` LIMIT $${params.length + 1}`;
+      params.push(this.limitValue);
+    }
+
+    if (this.offsetValue !== null) {
+      sqlString += ` OFFSET $${params.length + 1}`;
+      params.push(this.offsetValue);
+    }
+
+    // Adjust return type here to match [{ count: number }]
+    return new Query<M, T, "count", JT>(
+      this.tableName,
+      this.sqlClient,
+      ["count"],
+      this.conditions,
+      this.joins,
+      this.limitValue,
+      this.offsetValue,
+      this.joinedTables,
+      null,
+      false,
+      this.modelsDef // Pass modelsDef
+    );
+  }
+
   public select<N extends SelectFieldFrom<M, JT>>(
     fields: N[]
   ): Query<M, T, N, JT> {
@@ -533,7 +599,9 @@ class Query<
 
         const fieldsStr =
           this.selectedFields.length > 0
-            ? this.selectedFields.join(", ")
+            ? this.selectedFields[0] === "count"
+              ? "COUNT(*) AS count"
+              : this.selectedFields.join(", ")
             : `${String(this.tableName)}.*`;
 
         sqlString = `SELECT ${fieldsStr} FROM ${String(this.tableName)}`;

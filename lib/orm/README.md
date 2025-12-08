@@ -6,6 +6,8 @@ This module provides a simple Object Relational Mapping (ORM) system for managin
 
 Schema definitions are written in a custom format that describes the structure of your models, including fields, types, constraints, and relationships. The schema is used to generate the necessary database tables and perform migrations.
 
+Schema definition files are typically stored in the root directory of your project with a `.dikit` extension.
+
 Example schema definition:
 ```plaintext
 model user {
