@@ -141,17 +141,16 @@ class Query<
     this.joinedTables = joinedTables;
     this.updateValues = updateValues;
     this.isDeleteOperation = isDeleteOperation;
-    this.modelsDef = modelsDef; // Initialized modelsDef
+    this.modelsDef = modelsDef;
   }
 
-  public count(): Query<M, T, "count", JT> {
+  public async count(): Promise<number> {
     if (this.updateValues || this.isDeleteOperation) {
       throw new Error("COUNT cannot be used with update() or delete().");
     }
 
-    // Create the SQL query for counting rows
     let sqlString = `SELECT COUNT(*) AS count FROM ${String(this.tableName)}`;
-    let params: any[] = [];
+    const params: any[] = [];
 
     // Apply joins
     this.joins.forEach((join) => {
@@ -164,7 +163,6 @@ class Query<
     const whereClauses: string[] = [];
     for (const conditionKey in this.conditions) {
       if (this.conditions.hasOwnProperty(conditionKey)) {
-        // Extract table alias and field name from the conditionKey
         const [tableAlias, fieldName] = conditionKey.split(".");
         const modelDef = this.modelsDef[tableAlias as keyof Models];
 
@@ -183,7 +181,7 @@ class Query<
       sqlString += ` WHERE ${whereClauses.join(" AND ")}`;
     }
 
-    // Apply limit and offset (if applicable)
+    // Apply limit and offset (Though rarely used with direct COUNT(*))
     if (this.limitValue !== null) {
       sqlString += ` LIMIT $${params.length + 1}`;
       params.push(this.limitValue);
@@ -194,20 +192,21 @@ class Query<
       params.push(this.offsetValue);
     }
 
-    // Adjust return type here to match [{ count: number }]
-    return new Query<M, T, "count", JT>(
-      this.tableName,
-      this.sqlClient,
-      ["count"],
-      this.conditions,
-      this.joins,
-      this.limitValue,
-      this.offsetValue,
-      this.joinedTables,
-      null,
-      false,
-      this.modelsDef // Pass modelsDef
-    );
+    // Execute immediately
+    const startTime = process.hrtime.bigint();
+    const res = await this.sqlClient.unsafe(sqlString, params);
+    const endTime = process.hrtime.bigint();
+    const durationMs = Number(endTime - startTime) / 1_000_000;
+
+    logQueryExecution(sqlString, durationMs);
+
+    // Parse result
+    if (res && res.length > 0) {
+      // Postgres returns count as BigInt/string, we cast to Number
+      return Number(res[0].count);
+    }
+
+    return 0;
   }
 
   public select<N extends SelectFieldFrom<M, JT>>(
