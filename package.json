@@ -9,7 +9,7 @@
     "orm": "bun run lib/orm",
     "orm:migrate": "bun run lib/orm/exec/migrate.ts",
     "dev": "bun run lib/utils/generate-injection.ts && bun run lib/utils/static/build-react-views.ts && bun run lib/utils/static/generate-react-view.ts && bun run src/app.ts",
-    "orm:visualize": "bun run lib/orm/database-visualizer.ts"
+    "orm:visualize": "bun run --hot lib/orm/database-visualizer.ts"
   },
   "keywords": [],
   "author": "",

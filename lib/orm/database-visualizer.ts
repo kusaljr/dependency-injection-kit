@@ -188,6 +188,7 @@ const html = `
       width: 100%; height: 100%;
       display: flex; flex-direction: column;
       color: white;
+      background: var(--panel);
     }
     .node-header {
       background: #020617; padding: 8px 10px;
@@ -396,7 +397,9 @@ const html = `
                   \${icon}
                   <span class="col-name">\${col.name}</span>
                 </div>
-                <span class="col-type">\${col.type}</span>
+                <span
+                style="font-family: monospace; font-size: 6px;"
+                class="col-type">\${col.type}</span>
               </div>
             \`;
           }).join('');
