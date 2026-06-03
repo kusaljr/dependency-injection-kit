@@ -393,11 +393,13 @@ export class Parser {
       } else if (decoName === "required") {
         isRequired = true;
       } else if (decoName === "default") {
-        this.consume(TokenType.LPAREN, "Expected '(' after @default"); // Consume opening paren for @default
+        this.consume(TokenType.LPAREN, "Expected '(' after @default");
 
-        const valTok = this.peek(); // Peek, don't advance yet
+        const valTok = this.peek();
 
-        if (valTok.type === TokenType.NUMBER_LITERAL) {
+        if (valTok.type === TokenType.RPAREN) {
+          defaultValue = undefined;
+        } else if (valTok.type === TokenType.NUMBER_LITERAL) {
           defaultValue = Number(this.advance().value);
         } else if (valTok.type === TokenType.STRING_LITERAL) {
           defaultValue = this.advance().value;

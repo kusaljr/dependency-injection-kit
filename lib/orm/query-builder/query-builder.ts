@@ -1,5 +1,5 @@
 import { SQL } from "bun";
-import { SchemaNode } from "../core/ast";
+import { RelationEnum, SchemaNode } from "../core/ast";
 import { Models } from "../types/schema-types";
 import { logQueryExecution } from "../utils";
 
@@ -130,6 +130,8 @@ class Query<
   protected modelsDef: Models;
   protected cteEntries: CteEntry<M>[] = [];
   protected enumFields: Map<string, string>;
+  protected ast: SchemaNode;
+  protected connectOps: Array<{ field: string; value: Record<string, any> }> = [];
 
   constructor(
     protected readonly tableName: T,
@@ -144,7 +146,8 @@ class Query<
     isDeleteOperation: boolean = false,
     modelsDef: Models,
     cteEntries: CteEntry<M>[] = [],
-    enumFields: Map<string, string> = new Map()
+    enumFields: Map<string, string> = new Map(),
+    ast: SchemaNode
   ) {
     this.selectedFields = fields;
     this.conditions = conditions;
@@ -157,6 +160,66 @@ class Query<
     this.modelsDef = modelsDef;
     this.cteEntries = cteEntries;
     this.enumFields = enumFields;
+    this.ast = ast;
+  }
+
+  protected getModelDef() {
+    return this.ast.models.find((m) => m.name === this.tableName);
+  }
+
+  protected getFieldDef(fieldName: string) {
+    return this.getModelDef()?.fields.find((f) => f.name === fieldName);
+  }
+
+  private buildWhereSql(): { clause: string; params: any[] } {
+    const whereClauses: string[] = [];
+    const whereParams: any[] = [];
+    let index = 1;
+    for (const field in this.conditions) {
+      if (!Object.prototype.hasOwnProperty.call(this.conditions, field)) continue;
+      const [tableAlias, fieldName] = field.split(".");
+      const enumType = this.getEnumType(tableAlias, fieldName);
+      if (enumType) {
+        whereClauses.push(`${field} = $${index++}::${enumType}`);
+      } else {
+        whereClauses.push(`${field} = $${index++}`);
+      }
+      whereParams.push((this.conditions as any)[field]);
+    }
+    return { clause: whereClauses.join(" AND "), params: whereParams };
+  }
+
+  private async executeConnectOps(): Promise<void> {
+    for (const op of this.connectOps) {
+      const fieldDef = this.getFieldDef(op.field);
+      if (!fieldDef?.relation) continue;
+      const relation = fieldDef.relation;
+      const tableName = String(this.tableName);
+      const targetName = fieldDef.fieldType;
+
+      if (relation.type === RelationEnum.MANY_TO_MANY) {
+        const sorted = [tableName, targetName].sort();
+        const joinTable = `_${sorted.join("_")}`;
+        const sourceCol = `${tableName}_id`;
+        const targetCol = `${targetName}_id`;
+        const { clause: whereClause, params } = this.buildWhereSql();
+        const whereSQL = whereClause ? ` WHERE ${whereClause}` : "";
+        const sql = `INSERT INTO ${joinTable} (${sourceCol}, ${targetCol}) SELECT id, $1 FROM ${tableName}${whereSQL} ON CONFLICT DO NOTHING`;
+        await this.sqlClient.unsafe(sql, [op.value.id, ...params]);
+      } else if (relation.type === RelationEnum.MANY_TO_ONE || relation.type === RelationEnum.ONE_TO_ONE) {
+        const fkCol = relation.foreignKey || `${targetName}_id`;
+        const { clause: whereClause, params } = this.buildWhereSql();
+        const whereSQL = whereClause ? ` WHERE ${whereClause}` : "";
+        const sql = `UPDATE ${tableName} SET ${fkCol} = $1${whereSQL}`;
+        await this.sqlClient.unsafe(sql, [op.value.id, ...params]);
+      } else if (relation.type === RelationEnum.ONE_TO_MANY) {
+        const fkCol = relation.foreignKey || `${tableName}_id`;
+        const { clause: whereClause, params } = this.buildWhereSql();
+        const whereSQL = whereClause ? ` WHERE ${whereClause}` : "";
+        const sql = `UPDATE ${targetName} SET ${fkCol} = (SELECT id FROM ${tableName}${whereSQL ? ` WHERE ${whereSQL}` : ""}) WHERE id = $1`;
+        await this.sqlClient.unsafe(sql, [op.value.id, ...params]);
+      }
+    }
   }
 
   public async count(): Promise<number> {
@@ -250,7 +313,8 @@ class Query<
       false,
       this.modelsDef,
       this.cteEntries,
-      this.enumFields
+      this.enumFields,
+      this.ast
     );
   }
 
@@ -268,7 +332,8 @@ class Query<
       this.isDeleteOperation,
       this.modelsDef,
       this.cteEntries,
-      this.enumFields
+      this.enumFields,
+      this.ast
     );
   }
 
@@ -289,7 +354,8 @@ class Query<
       false,
       this.modelsDef,
       this.cteEntries,
-      this.enumFields
+      this.enumFields,
+      this.ast
     );
   }
 
@@ -310,7 +376,8 @@ class Query<
       false,
       this.modelsDef,
       this.cteEntries,
-      this.enumFields
+      this.enumFields,
+      this.ast
     );
   }
 
@@ -364,7 +431,8 @@ class Query<
       false,
       this.modelsDef,
       this.cteEntries,
-      this.enumFields
+      this.enumFields,
+      this.ast
     );
   }
 
@@ -448,6 +516,10 @@ class Query<
         String(this.tableName),
         field
       );
+
+      // Skip relation fields (handled via connect ops in execute())
+      const fieldDef = this.getFieldDef(field);
+      if (fieldDef?.relation) continue;
 
       if (fieldType === "json" && typeof value === "object" && value !== null) {
         setClauses.push(
@@ -711,6 +783,15 @@ class Query<
     return sql.replace(/\$(\d+)/g, (_, num) => `$${parseInt(num) + offset}`);
   }
 
+  public connect(field: string, value: Record<string, any>): this {
+    const fieldDef = this.getFieldDef(field);
+    if (!fieldDef?.relation) {
+      throw new Error(`Field '${field}' is not a relation field.`);
+    }
+    this.connectOps.push({ field, value });
+    return this;
+  }
+
   public async execute(): Promise<ExecuteResult<M, T, F>> {
     let sqlString: string;
     let params: any[];
@@ -719,8 +800,30 @@ class Query<
     const startTime = process.hrtime.bigint();
 
     if (this.updateValues) {
-      ({ sql: sqlString, params } = this._update(this.updateValues));
-      res = await this.sqlClient.unsafe(sqlString, params);
+      // Filter relation fields into connect ops before building SQL
+      for (const field in this.updateValues) {
+        if (!Object.prototype.hasOwnProperty.call(this.updateValues, field)) continue;
+        const value = this.updateValues[field];
+        const fieldDef = this.getFieldDef(field);
+        if (fieldDef?.relation && value !== null && typeof value === "object") {
+          this.connectOps.push({ field, value: value as Record<string, any> });
+        }
+      }
+
+      // Only run UPDATE if there are real (non-relation) fields
+      const realFields = Object.keys(this.updateValues).filter((k) => {
+        const fd = this.getFieldDef(k);
+        return !fd?.relation;
+      });
+
+      if (realFields.length > 0) {
+        ({ sql: sqlString, params } = this._update(this.updateValues));
+        res = await this.sqlClient.unsafe(sqlString, params);
+      } else {
+        sqlString = "";
+        res = null;
+      }
+
     } else if (this.isDeleteOperation) {
       ({ sql: sqlString, params } = this._delete());
       res = await this.sqlClient.unsafe(sqlString, params);
@@ -743,6 +846,11 @@ class Query<
       res = await this.sqlClient.unsafe(sqlString, params);
     }
 
+    // Run queued connect ops regardless of query type
+    if (this.connectOps.length > 0) {
+      await this.executeConnectOps();
+    }
+
     const endTime = process.hrtime.bigint();
     const durationMs = Number(endTime - startTime) / 1_000_000;
     logQueryExecution(sqlString, durationMs);
@@ -756,7 +864,8 @@ class Table<M extends Models, T extends keyof M> {
     private tableName: T,
     private sqlClient: SQL,
     private modelsDef: Models,
-    private enumFields: Map<string, string>
+    private enumFields: Map<string, string>,
+    private ast: SchemaNode
   ) {}
   public select<F extends SelectFieldFrom<M, T>>(
     fields: F[]
@@ -774,7 +883,8 @@ class Table<M extends Models, T extends keyof M> {
       false,
       this.modelsDef,
       [],
-      this.enumFields
+      this.enumFields,
+      this.ast
     );
   }
 
@@ -794,7 +904,8 @@ class Table<M extends Models, T extends keyof M> {
       false,
       this.modelsDef,
       [],
-      this.enumFields
+      this.enumFields,
+      this.ast
     ) as Query<M, T, SelectFieldFrom<M, T>, T>;
   }
 
@@ -815,7 +926,8 @@ class Table<M extends Models, T extends keyof M> {
       false,
       this.modelsDef,
       [],
-      this.enumFields
+      this.enumFields,
+      this.ast
     );
   }
 
@@ -836,7 +948,8 @@ class Table<M extends Models, T extends keyof M> {
       false,
       this.modelsDef,
       [],
-      this.enumFields
+      this.enumFields,
+      this.ast
     );
   }
 
@@ -857,7 +970,8 @@ class Table<M extends Models, T extends keyof M> {
       false,
       this.modelsDef,
       [],
-      this.enumFields
+      this.enumFields,
+      this.ast
     );
   }
 
@@ -977,7 +1091,8 @@ RETURNING *`;
       false,
       this.modelsDef,
       [],
-      this.enumFields
+      this.enumFields,
+      this.ast
     ) as Query<M, T, SelectFieldFrom<M, T>, T>;
   }
 
@@ -995,7 +1110,8 @@ RETURNING *`;
       true,
       this.modelsDef,
       [],
-      this.enumFields
+      this.enumFields,
+      this.ast
     ) as Query<M, T, SelectFieldFrom<M, T>, T>;
   }
 }
@@ -1004,7 +1120,6 @@ type InferQueryTable<M extends Models, Q> = Q extends Query<M, infer T, any, any
 type InferQueryJoined<M extends Models, Q> = Q extends Query<M, any, any, infer JT> ? JT : never;
 
 class CteQuery<M extends Models, T extends keyof M = never, JT extends keyof M = never> extends Query<M, any, any, any> {
-  private ast: SchemaNode;
 
   constructor(
     ast: SchemaNode,
@@ -1035,9 +1150,9 @@ class CteQuery<M extends Models, T extends keyof M = never, JT extends keyof M =
       isDeleteOperation ?? false,
       modelsDef,
       cteEntries,
-      enumFields ?? new Map()
+      enumFields ?? new Map(),
+      ast
     );
-    this.ast = ast;
   }
 
   public with<R extends Query<M, any, any, any>>(
@@ -1084,7 +1199,8 @@ class CteQuery<M extends Models, T extends keyof M = never, JT extends keyof M =
       this.isDeleteOperation,
       this.modelsDef,
       this.cteEntries,
-      this.enumFields
+      this.enumFields,
+      this.ast
     ) as any;
   }
 
@@ -1131,7 +1247,7 @@ export class DB<M extends Models> {
         if (field.enumValues !== undefined || enumNames.has(field.fieldType)) {
           this.enumFields.set(
             `${model.name}.${field.name}`,
-            field.fieldType
+            `"${field.fieldType}"`
           );
         }
       });
@@ -1149,7 +1265,8 @@ export class DB<M extends Models> {
       tableName,
       this.sqlClient,
       this.modelsDef,
-      this.enumFields
+      this.enumFields,
+      this.ast
     );
   }
 

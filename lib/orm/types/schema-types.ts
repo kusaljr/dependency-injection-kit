@@ -30,6 +30,20 @@ export type brand = {
   updated_at? : string;
 };
 
+export type product = {
+  id? : number;
+  name : string;
+  description? : string;
+  price : number;
+  status? : ProductStatus;
+  barcode? : barcode;
+  brand_id? : number;
+  brand? : brand;
+  categories? : category;
+  created_at? : string;
+  updated_at? : string;
+};
+
 export type category = {
   id? : number;
   name : string;
@@ -39,10 +53,11 @@ export type category = {
   updated_at? : string;
 };
 
-export type ModelNames = "barcode" | "brand" | "category";
+export type ModelNames = "barcode" | "brand" | "product" | "category";
 
 export type Models = {
   barcode: barcode;
   brand: brand;
+  product: product;
   category: category;
 };

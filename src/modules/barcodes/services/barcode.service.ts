@@ -7,25 +7,44 @@ export class BarcodeService {
   constructor() {}
 
   async getBarcodeList(limit: number, page: number) {
-    const result = await dikitDB
-      .with("active_barcodes", (db) =>
-        db.table("barcode").where({
-          "barcode.is_active": true,
-        }),
-      )
-      .from("active_barcodes")
-      .limit(Number(limit))
-      .offset(Number((page - 1) * limit))
-      .select(["active_barcodes.code"])
+    // const result = await dikitDB
+    //   .with("active_barcodes", (db) =>
+    //     db.table("barcode").where({
+    //       "barcode.is_active": true,
+    //     }),
+    //   )
+    //   .from("active_barcodes")
+    //   .limit(Number(limit))
+    //   .offset(Number((page - 1) * limit))
+    //   .select(["active_barcodes.code"])
+    //   .execute();
+
+    const category = dikitDB.table("category").insert({
+      name: "Category 1",
+    });
+
+    const updated = await dikitDB
+      .table("product")
+      .update({ categories: { id: 1 } })
+      .where({ "product.id": 1 })
       .execute();
 
-    return result;
+    const prod = await dikitDB
+      .table("product")
+      .where({ "product.status": "ACTIVE", "product.id": 1 })
+      .select(["product.categories"])
+      .limit(limit)
+      .offset((page - 1) * limit)
+      .execute();
+
+    return prod;
   }
 
   async getBarcodeById(id: number) {
     const product = await dikitDB
       .table("barcode")
       .select([])
+
       .where({
         "barcode.id": Number(id),
       })

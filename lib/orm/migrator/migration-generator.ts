@@ -383,7 +383,7 @@ export class SqlGenerator {
     if (currField.fieldType !== prevField.fieldType) {
       let sqlType: string | undefined;
       if (currField.enumValues !== undefined) {
-        sqlType = currField.fieldType;
+        sqlType = this.quote(currField.fieldType);
       } else {
         sqlType = this.mapFieldTypeToSql(currField.fieldType);
       }
@@ -395,7 +395,7 @@ export class SqlGenerator {
           this.dialect === "postgresql" &&
           currField.enumValues !== undefined
         ) {
-          alter += ` USING ${currField.name}::${this.quote(currField.fieldType)}`;
+          alter += ` USING ${currField.name}::${sqlType}`;
         }
         alter += ";";
         stmts.push(alter);
@@ -454,7 +454,7 @@ export class SqlGenerator {
     let sqlType: string | undefined;
 
     if (field.enumValues !== undefined) {
-      sqlType = field.fieldType;
+      sqlType = this.quote(field.fieldType);
     } else {
       sqlType = this.mapFieldTypeToSql(field.fieldType);
     }
