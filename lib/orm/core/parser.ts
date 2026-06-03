@@ -1,4 +1,5 @@
 import {
+  EnumNode,
   FieldNode,
   JsonTypeDefinitionNode,
   ModelNode,
@@ -18,6 +19,7 @@ export class Parser {
   private tokens: Token[];
   private currentTokenIndex = 0;
   private errors: SyntaxError[] = [];
+  private declaredEnumValues: Map<string, string[]> = new Map();
 
   constructor(tokens: Token[]) {
     this.tokens = tokens;
@@ -50,16 +52,33 @@ export class Parser {
   public parse(): { ast: SchemaNode | null; errors: SyntaxError[] } {
     try {
       const models: ModelNode[] = [];
+      const enums: EnumNode[] = [];
 
       while (this.peek().type !== TokenType.EOF) {
         const initialIndex = this.currentTokenIndex;
         try {
-          models.push(this.parseModelDefinition());
+          if (this.peek().type === TokenType.ENUM_KEYWORD) {
+            enums.push(this.parseEnumDefinition());
+          } else if (this.peek().type === TokenType.MODEL_KEYWORD) {
+            models.push(this.parseModelDefinition());
+          } else {
+            const tok = this.peek();
+            this.errors.push(
+              new SyntaxError(
+                `Expected 'model', 'enum', or 'type' declaration at top level`,
+                tok.line,
+                tok.column
+              )
+            );
+            this.advance();
+          }
         } catch (e) {
           if (e instanceof SyntaxError) {
-            // error recovery: skip until next model or EOF
+            // error recovery: skip until next declaration or EOF
             while (
               this.peek().type !== TokenType.MODEL_KEYWORD &&
+              this.peek().type !== TokenType.ENUM_KEYWORD &&
+              this.peek().type !== TokenType.TYPE_KEYWORD &&
               this.peek().type !== TokenType.EOF
             ) {
               this.advance();
@@ -86,6 +105,7 @@ export class Parser {
         ast: {
           kind: "Schema",
           models,
+          enums: enums.length > 0 ? enums : undefined,
           line: 1,
           column: 1,
         },
@@ -104,6 +124,56 @@ export class Parser {
       }
       return { ast: null, errors: this.errors };
     }
+  }
+
+  private parseEnumDefinition(): EnumNode {
+    const enumToken = this.consume(
+      TokenType.ENUM_KEYWORD,
+      "Expected 'enum' keyword"
+    );
+    const nameToken = this.consume(TokenType.IDENTIFIER, "Expected enum name");
+    this.consume(TokenType.LCURLY, "Expected '{' after enum name");
+
+    const values: string[] = [];
+
+    while (
+      this.peek().type !== TokenType.RCURLY &&
+      this.peek().type !== TokenType.EOF
+    ) {
+      const valToken = this.consume(
+        TokenType.IDENTIFIER,
+        "Expected enum value identifier"
+      );
+      values.push(valToken.value);
+
+      if (this.peek().type === TokenType.COMMA) {
+        this.advance();
+      } else if (
+        this.peek().type !== TokenType.RCURLY &&
+        this.peek().type !== TokenType.EOF
+      ) {
+        throw new SyntaxError(
+          "Expected ',' or '}' after enum value",
+          this.peek().line,
+          this.peek().column
+        );
+      }
+    }
+
+    this.consume(
+      TokenType.RCURLY,
+      `Expected '}' to close enum '${nameToken.value}'`
+    );
+
+    this.declaredEnumValues.set(nameToken.value, values);
+
+    return {
+      kind: "Enum",
+      name: nameToken.value,
+      values,
+      line: enumToken.line,
+      column: enumToken.column,
+    };
   }
 
   private parseModelDefinition(): ModelNode {
@@ -260,6 +330,18 @@ export class Parser {
     } else if (typeToken.type === TokenType.IDENTIFIER) {
       fieldType = typeToken.value;
       this.advance();
+    } else if (typeToken.type === TokenType.ENUM_KEYWORD) {
+      const enumNameToken = this.peek();
+      if (enumNameToken.type === TokenType.IDENTIFIER) {
+        fieldType = enumNameToken.value;
+        this.advance();
+      } else {
+        throw new SyntaxError(
+          "Expected enum type name after 'enum'",
+          enumNameToken.line,
+          enumNameToken.column
+        );
+      }
     } else {
       throw new SyntaxError(
         `Unexpected type '${typeToken.value}'`,
@@ -375,6 +457,9 @@ export class Parser {
       isRequired,
       isUnique,
       defaultValue,
+      enumValues: this.declaredEnumValues.has(fieldType)
+        ? this.declaredEnumValues.get(fieldType)
+        : undefined,
       line: nameToken.line,
       column: nameToken.column,
     };

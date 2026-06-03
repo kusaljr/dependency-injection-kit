@@ -104,25 +104,36 @@ interface PreparedStatement {
   params: any[];
 }
 
+type CteResultType = Record<string, any>;
+
+interface CteEntry<M extends Models> {
+  name: string;
+  sql: string;
+  params: any[];
+  resultType?: CteResultType;
+}
+
 class Query<
   M extends Models,
   T extends keyof M,
   F extends string = SelectFieldFrom<M, T>,
   JT extends keyof M = T
 > {
-  private selectedFields: F[];
-  private conditions: Condition<M, T>;
-  private joins: JoinClause<M>[];
-  private limitValue: number | null;
-  private offsetValue: number | null;
-  private joinedTables: JT[];
-  private updateValues: UpdateValues<M, T> | null = null;
-  private isDeleteOperation: boolean = false;
-  private modelsDef: Models; // Added modelsDef property
+  protected selectedFields: F[];
+  protected conditions: Condition<M, T>;
+  protected joins: JoinClause<M>[];
+  protected limitValue: number | null;
+  protected offsetValue: number | null;
+  protected joinedTables: JT[];
+  protected updateValues: UpdateValues<M, T> | null = null;
+  protected isDeleteOperation: boolean = false;
+  protected modelsDef: Models;
+  protected cteEntries: CteEntry<M>[] = [];
+  protected enumFields: Map<string, string>;
 
   constructor(
-    private tableName: T,
-    private sqlClient: SQL, // Use SQLClient type here
+    protected readonly tableName: T,
+    protected readonly sqlClient: SQL,
     fields: F[] = [],
     conditions: Condition<M, T> = {},
     joins: JoinClause<M>[] = [],
@@ -131,7 +142,9 @@ class Query<
     joinedTables: JT[] = [tableName as unknown as JT],
     updateValues: UpdateValues<M, T> | null = null,
     isDeleteOperation: boolean = false,
-    modelsDef: Models // Added modelsDef to constructor
+    modelsDef: Models,
+    cteEntries: CteEntry<M>[] = [],
+    enumFields: Map<string, string> = new Map()
   ) {
     this.selectedFields = fields;
     this.conditions = conditions;
@@ -142,6 +155,8 @@ class Query<
     this.updateValues = updateValues;
     this.isDeleteOperation = isDeleteOperation;
     this.modelsDef = modelsDef;
+    this.cteEntries = cteEntries;
+    this.enumFields = enumFields;
   }
 
   public async count(): Promise<number> {
@@ -165,11 +180,15 @@ class Query<
       if (this.conditions.hasOwnProperty(conditionKey)) {
         const [tableAlias, fieldName] = conditionKey.split(".");
         const modelDef = this.modelsDef[tableAlias as keyof Models];
+        const enumType = this.getEnumType(tableAlias, fieldName);
 
         if (modelDef && (modelDef as any)[fieldName] === "json") {
           whereClauses.push(`${conditionKey} @> $${params.length + 1}`);
           const jsonValue = (this.conditions as any)[conditionKey];
           params.push(jsonValue);
+        } else if (enumType) {
+          whereClauses.push(`${conditionKey} = $${params.length + 1}::${enumType}`);
+          params.push((this.conditions as any)[conditionKey]);
         } else {
           whereClauses.push(`${conditionKey} = $${params.length + 1}`);
           params.push((this.conditions as any)[conditionKey]);
@@ -211,6 +230,9 @@ class Query<
 
   public select<N extends SelectFieldFrom<M, JT>>(
     fields: N[]
+  ): Query<M, T, N, JT>;
+  public select<N extends string>(
+    fields: N[]
   ): Query<M, T, N, JT> {
     if (this.isDeleteOperation) {
       throw new Error("SELECT cannot be used after update() or delete().");
@@ -226,7 +248,9 @@ class Query<
       this.joinedTables,
       this.updateValues,
       false,
-      this.modelsDef // Pass modelsDef
+      this.modelsDef,
+      this.cteEntries,
+      this.enumFields
     );
   }
 
@@ -242,7 +266,9 @@ class Query<
       this.joinedTables,
       this.updateValues,
       this.isDeleteOperation,
-      this.modelsDef // Pass modelsDef
+      this.modelsDef,
+      this.cteEntries,
+      this.enumFields
     );
   }
 
@@ -261,7 +287,9 @@ class Query<
       this.joinedTables,
       null,
       false,
-      this.modelsDef // Pass modelsDef
+      this.modelsDef,
+      this.cteEntries,
+      this.enumFields
     );
   }
 
@@ -280,7 +308,9 @@ class Query<
       this.joinedTables,
       null,
       false,
-      this.modelsDef // Pass modelsDef
+      this.modelsDef,
+      this.cteEntries,
+      this.enumFields
     );
   }
 
@@ -332,8 +362,14 @@ class Query<
       newJoinedTables,
       null,
       false,
-      this.modelsDef // Pass modelsDef
+      this.modelsDef,
+      this.cteEntries,
+      this.enumFields
     );
+  }
+
+  private getEnumType(tableAlias: string, fieldName: string): string | undefined {
+    return this.enumFields.get(`${tableAlias}.${fieldName}`);
   }
 
   private buildJsonSetExpressions(
@@ -408,11 +444,18 @@ class Query<
       const modelDef = this.modelsDef[this.tableName as keyof Models];
       const fieldType = (modelDef as any)?.[field];
       const value = values[field];
+      const enumType = this.getEnumType(
+        String(this.tableName),
+        field
+      );
 
       if (fieldType === "json" && typeof value === "object" && value !== null) {
         setClauses.push(
           ...this.buildJsonSetExpressions(field, value, makePlaceholder)
         );
+      } else if (enumType) {
+        setClauses.push(`${field} = $${index++}::${enumType}`);
+        updateParams.push(value);
       } else {
         setClauses.push(`${field} = $${index++}`);
         updateParams.push(value);
@@ -423,7 +466,7 @@ class Query<
       throw new Error("No values provided for update.");
     }
 
-    /* ---------- WHERE clause (unchanged) ---------------------------------- */
+    /* ---------- WHERE clause ---------------------------------- */
     const whereClauses: string[] = [];
     const whereParams: any[] = [];
 
@@ -434,9 +477,13 @@ class Query<
       const [tableAlias, fieldName] = field.split(".");
       const modelDef = this.modelsDef[tableAlias as keyof Models];
       const fieldType = (modelDef as any)?.[fieldName];
+      const enumType = this.getEnumType(tableAlias, fieldName);
 
       if (fieldType === "json") {
         whereClauses.push(`${field} @> $${index++}`);
+        whereParams.push(this.conditions[field]);
+      } else if (enumType) {
+        whereClauses.push(`${field} = $${index++}::${enumType}`);
         whereParams.push(this.conditions[field]);
       } else {
         whereClauses.push(`${field} = $${index++}`);
@@ -470,7 +517,13 @@ class Query<
     let index = 1;
     for (const field in this.conditions) {
       if (this.conditions.hasOwnProperty(field)) {
-        whereClauses.push(`${String(field)} = $${index++}`);
+        const [tableAlias, fieldName] = field.split(".");
+        const enumType = this.getEnumType(tableAlias, fieldName);
+        if (enumType) {
+          whereClauses.push(`${String(field)} = $${index++}::${enumType}`);
+        } else {
+          whereClauses.push(`${String(field)} = $${index++}`);
+        }
         whereParams.push(this.conditions[field]);
       }
     }
@@ -543,12 +596,15 @@ class Query<
     const params: any[] = [];
     let idx = 1;
     for (const [k, v] of Object.entries(this.conditions)) {
-      // Logic for JSON type handling in buildJsonAggSQL
       const [tableAlias, fieldName] = k.split(".");
       const modelDef = this.modelsDef[tableAlias as keyof Models];
+      const enumType = this.getEnumType(tableAlias, fieldName);
       if (modelDef && (modelDef as any)[fieldName] === "json") {
         whereClauses.push(`${k} @> $${idx++}`);
         params.push(JSON.stringify(v).replace(/\\/g, ""));
+      } else if (enumType) {
+        whereClauses.push(`${k} = $${idx++}::${enumType}`);
+        params.push(v);
       } else {
         whereClauses.push(`${k} = $${idx++}`);
         params.push(v);
@@ -575,6 +631,86 @@ class Query<
     return { query, params };
   }
 
+  public buildSelectSql(): { sql: string; params: any[] } {
+    let sqlString: string;
+    let params: any[];
+
+    const isJsonAggQuery = this.joins.length > 0;
+
+    if (isJsonAggQuery) {
+      ({ query: sqlString, params } = this.buildJsonAggSQL());
+    } else {
+      let paramIndex = 1;
+
+      const fieldsStr =
+        this.selectedFields.length > 0
+          ? this.selectedFields[0] === "count"
+            ? "COUNT(*) AS count"
+            : this.selectedFields.join(", ")
+          : `${String(this.tableName)}.*`;
+
+      sqlString = `SELECT ${fieldsStr} FROM ${String(this.tableName)}`;
+      params = [];
+
+      this.joins.forEach((join) => {
+        sqlString += ` ${join.type.toUpperCase()} JOIN ${String(
+          join.target
+        )} ON ${join.on}`;
+      });
+
+      const whereClauses: string[] = [];
+      for (const conditionKey in this.conditions) {
+        if (this.conditions.hasOwnProperty(conditionKey)) {
+          const [tableAlias, fieldName] = conditionKey.split(".");
+          const modelDef = this.modelsDef[tableAlias as keyof Models];
+          const enumType = this.getEnumType(tableAlias, fieldName);
+
+          if (modelDef && (modelDef as any)[fieldName] === "json") {
+            whereClauses.push(`${conditionKey} @> $${paramIndex++}`);
+            const jsonValue = (this.conditions as any)[conditionKey];
+            params.push(jsonValue);
+          } else if (enumType) {
+            whereClauses.push(`${conditionKey} = $${paramIndex++}::${enumType}`);
+            params.push((this.conditions as any)[conditionKey]);
+          } else {
+            whereClauses.push(`${conditionKey} = $${paramIndex++}`);
+            params.push((this.conditions as any)[conditionKey]);
+          }
+        }
+      }
+
+      if (whereClauses.length > 0) {
+        sqlString += ` WHERE ${whereClauses.join(" AND ")}`;
+      }
+
+      if (this.limitValue !== null) {
+        sqlString += ` LIMIT $${paramIndex++}`;
+        params.push(this.limitValue);
+      }
+
+      if (this.offsetValue !== null) {
+        sqlString += ` OFFSET $${paramIndex++}`;
+        params.push(this.offsetValue);
+      }
+    }
+
+    return { sql: sqlString, params };
+  }
+
+  private buildCteClause(): { sql: string; paramOffset: number } {
+    if (this.cteEntries.length === 0) return { sql: "", paramOffset: 0 };
+    const ctes = this.cteEntries.map(
+      (e) => `${e.name} AS (${e.sql})`
+    );
+    const totalCteParams = this.cteEntries.reduce((sum, e) => sum + e.params.length, 0);
+    return { sql: `WITH ${ctes.join(", ")} `, paramOffset: totalCteParams };
+  }
+
+  private offsetSelectSql(sql: string, offset: number): string {
+    if (offset === 0) return sql;
+    return sql.replace(/\$(\d+)/g, (_, num) => `$${parseInt(num) + offset}`);
+  }
+
   public async execute(): Promise<ExecuteResult<M, T, F>> {
     let sqlString: string;
     let params: any[];
@@ -589,66 +725,26 @@ class Query<
       ({ sql: sqlString, params } = this._delete());
       res = await this.sqlClient.unsafe(sqlString, params);
     } else {
-      const isJsonAggQuery = this.joins.length > 0;
+      let mainSql: string;
+      let mainParams: any[];
+      ({ sql: mainSql, params: mainParams } = this.buildSelectSql());
 
-      if (isJsonAggQuery) {
-        ({ query: sqlString, params } = this.buildJsonAggSQL());
+      if (this.cteEntries.length > 0) {
+        const { sql: cteClause, paramOffset } = this.buildCteClause();
+        const offsetMainSql = this.offsetSelectSql(mainSql, paramOffset);
+        const cteParams = this.cteEntries.flatMap((e) => e.params);
+        sqlString = `${cteClause}${offsetMainSql}`;
+        params = [...cteParams, ...mainParams];
       } else {
-        let paramIndex = 1;
-
-        const fieldsStr =
-          this.selectedFields.length > 0
-            ? this.selectedFields[0] === "count"
-              ? "COUNT(*) AS count"
-              : this.selectedFields.join(", ")
-            : `${String(this.tableName)}.*`;
-
-        sqlString = `SELECT ${fieldsStr} FROM ${String(this.tableName)}`;
-        params = [];
-
-        this.joins.forEach((join) => {
-          sqlString += ` ${join.type.toUpperCase()} JOIN ${String(
-            join.target
-          )} ON ${join.on}`;
-        });
-
-        const whereClauses: string[] = [];
-        for (const conditionKey in this.conditions) {
-          if (this.conditions.hasOwnProperty(conditionKey)) {
-            // Extract table alias and field name from the conditionKey
-            const [tableAlias, fieldName] = conditionKey.split(".");
-            const modelDef = this.modelsDef[tableAlias as keyof Models];
-
-            if (modelDef && (modelDef as any)[fieldName] === "json") {
-              whereClauses.push(`${conditionKey} @> $${paramIndex++}`);
-              const jsonValue = (this.conditions as any)[conditionKey];
-              params.push(jsonValue);
-            } else {
-              whereClauses.push(`${conditionKey} = $${paramIndex++}`);
-              params.push((this.conditions as any)[conditionKey]);
-            }
-          }
-        }
-
-        if (whereClauses.length > 0) {
-          sqlString += ` WHERE ${whereClauses.join(" AND ")}`;
-        }
-
-        if (this.limitValue !== null) {
-          sqlString += ` LIMIT $${paramIndex++}`; // Use placeholder for LIMIT
-          params.push(this.limitValue);
-        }
-
-        if (this.offsetValue !== null) {
-          sqlString += ` OFFSET $${paramIndex++}`;
-          params.push(this.offsetValue);
-        }
+        sqlString = mainSql;
+        params = mainParams;
       }
+
       res = await this.sqlClient.unsafe(sqlString, params);
     }
 
     const endTime = process.hrtime.bigint();
-    const durationMs = Number(endTime - startTime) / 1_000_000; // Convert nanoseconds to milliseconds
+    const durationMs = Number(endTime - startTime) / 1_000_000;
     logQueryExecution(sqlString, durationMs);
 
     return res;
@@ -659,8 +755,9 @@ class Table<M extends Models, T extends keyof M> {
   constructor(
     private tableName: T,
     private sqlClient: SQL,
-    private modelsDef: Models
-  ) {} // Use SQLClient type here
+    private modelsDef: Models,
+    private enumFields: Map<string, string>
+  ) {}
   public select<F extends SelectFieldFrom<M, T>>(
     fields: F[]
   ): Query<M, T, F, T> {
@@ -675,7 +772,9 @@ class Table<M extends Models, T extends keyof M> {
       [this.tableName as unknown as T],
       null,
       false,
-      this.modelsDef
+      this.modelsDef,
+      [],
+      this.enumFields
     );
   }
 
@@ -693,7 +792,9 @@ class Table<M extends Models, T extends keyof M> {
       [this.tableName as unknown as T],
       null,
       false,
-      this.modelsDef // Pass modelsDef
+      this.modelsDef,
+      [],
+      this.enumFields
     ) as Query<M, T, SelectFieldFrom<M, T>, T>;
   }
 
@@ -712,7 +813,9 @@ class Table<M extends Models, T extends keyof M> {
       [this.tableName, target] as (T | J)[],
       null,
       false,
-      this.modelsDef // Pass modelsDef
+      this.modelsDef,
+      [],
+      this.enumFields
     );
   }
 
@@ -731,7 +834,9 @@ class Table<M extends Models, T extends keyof M> {
       [this.tableName, target] as (T | J)[],
       null,
       false,
-      this.modelsDef // Pass modelsDef
+      this.modelsDef,
+      [],
+      this.enumFields
     );
   }
 
@@ -750,7 +855,9 @@ class Table<M extends Models, T extends keyof M> {
       [this.tableName, target] as (T | J)[],
       null,
       false,
-      this.modelsDef // Pass modelsDef
+      this.modelsDef,
+      [],
+      this.enumFields
     );
   }
 
@@ -782,7 +889,13 @@ class Table<M extends Models, T extends keyof M> {
 
       const offset = rowIndex * fields.length;
       const rowPlaceholders = fields
-        .map((_, i) => `$${offset + i + 1}`)
+        .map((f, i) => {
+          const enumType = this.enumFields.get(
+            `${String(this.tableName)}.${f}`
+          );
+          const placeholder = `$${offset + i + 1}`;
+          return enumType ? `${placeholder}::${enumType}` : placeholder;
+        })
         .join(", ");
       allPlaceholders.push(`(${rowPlaceholders})`);
     });
@@ -810,7 +923,13 @@ class Table<M extends Models, T extends keyof M> {
 
     const insertFields = Object.keys(insertData);
     const insertPlaceholders = insertFields
-      .map((_, i) => `$${i + 1}`)
+      .map((f, i) => {
+        const enumType = this.enumFields.get(
+          `${String(this.tableName)}.${f}`
+        );
+        const placeholder = `$${i + 1}`;
+        return enumType ? `${placeholder}::${enumType}` : placeholder;
+      })
       .join(", ");
     const insertValues = insertFields.map(
       (f) => insertData[f as keyof typeof insertData]
@@ -856,7 +975,9 @@ RETURNING *`;
       [this.tableName as unknown as T],
       values,
       false,
-      this.modelsDef // Pass modelsDef
+      this.modelsDef,
+      [],
+      this.enumFields
     ) as Query<M, T, SelectFieldFrom<M, T>, T>;
   }
 
@@ -872,25 +993,148 @@ RETURNING *`;
       [this.tableName as unknown as T],
       null,
       true,
-      this.modelsDef
+      this.modelsDef,
+      [],
+      this.enumFields
     ) as Query<M, T, SelectFieldFrom<M, T>, T>;
   }
 }
 
+type InferQueryTable<M extends Models, Q> = Q extends Query<M, infer T, any, any> ? T : never;
+type InferQueryJoined<M extends Models, Q> = Q extends Query<M, any, any, infer JT> ? JT : never;
+
+class CteQuery<M extends Models, T extends keyof M = never, JT extends keyof M = never> extends Query<M, any, any, any> {
+  private ast: SchemaNode;
+
+  constructor(
+    ast: SchemaNode,
+    sqlClient: SQL,
+    modelsDef: Models,
+    cteEntries: CteEntry<M>[],
+    tableName?: any,
+    fields?: any[],
+    conditions?: any,
+    joins?: any[],
+    limit?: number | null,
+    offset?: number | null,
+    joinedTables?: any[],
+    updateValues?: any,
+    isDeleteOperation?: boolean,
+    enumFields?: Map<string, string>
+  ) {
+    super(
+      tableName ?? ("__cte__" as any),
+      sqlClient,
+      fields ?? [],
+      conditions ?? {},
+      joins ?? [],
+      limit ?? null,
+      offset ?? null,
+      joinedTables ?? [],
+      updateValues ?? null,
+      isDeleteOperation ?? false,
+      modelsDef,
+      cteEntries,
+      enumFields ?? new Map()
+    );
+    this.ast = ast;
+  }
+
+  public with<R extends Query<M, any, any, any>>(
+    name: string,
+    cb: (db: DB<M>) => R,
+    resultType?: CteResultType
+  ): CteQuery<M, InferQueryTable<M, R>, InferQueryJoined<M, R>> {
+    const entry = this.buildCteEntry(name, cb, resultType);
+    return new CteQuery<M, InferQueryTable<M, R>, InferQueryJoined<M, R>>(
+      this.ast,
+      this.sqlClient,
+      this.modelsDef,
+      [...this.cteEntries, entry],
+      this.tableName,
+      this.selectedFields,
+      this.conditions,
+      this.joins,
+      this.limitValue,
+      this.offsetValue,
+      this.joinedTables,
+      this.updateValues,
+      this.isDeleteOperation,
+      this.enumFields
+    );
+  }
+
+  public from<N extends string>(cteName: N): Query<
+    M & Record<N, M[JT]>,
+    N,
+    SelectFieldFrom<M & Record<N, M[JT]>, N>,
+    N
+  > {
+    this.validateCteReference(cteName);
+    return new Query(
+      cteName as any,
+      this.sqlClient,
+      this.selectedFields,
+      this.conditions,
+      this.joins,
+      this.limitValue,
+      this.offsetValue,
+      this.joinedTables,
+      this.updateValues,
+      this.isDeleteOperation,
+      this.modelsDef,
+      this.cteEntries,
+      this.enumFields
+    ) as any;
+  }
+
+  private validateCteReference(cteName: string): void {
+    const exists = this.cteEntries.some((e) => e.name === cteName);
+    if (!exists) {
+      throw new Error(
+        `CTE '${cteName}' is not defined. Available CTEs: ${this.cteEntries.map((e) => e.name).join(", ")}`
+      );
+    }
+  }
+
+  private buildCteEntry(
+    name: string,
+    cb: (db: DB<M>) => Query<M, any, any, any>,
+    resultType?: CteResultType
+  ): CteEntry<M> {
+    const tempDb = new DB<M>(this.ast, this.sqlClient);
+    const query = cb(tempDb);
+    const { sql, params } = query.buildSelectSql();
+    return { name, sql, params, resultType };
+  }
+}
+
 export class DB<M extends Models> {
-  private modelsDef: Models; // Add modelsDef to DB class
+  private modelsDef: Models;
+  private enumFields: Map<string, string>;
 
   constructor(private ast: SchemaNode, private sqlClient: SQL) {
-    // Populate modelsDef from ast.models
     this.modelsDef = {} as M;
+    this.enumFields = new Map();
+
+    const enumNames = new Set((ast.enums ?? []).map((e) => e.name));
+
     this.ast.models.forEach((model) => {
       (this.modelsDef as any)[model.name] = model.fields.reduce(
         (acc: any, field: any) => {
-          acc[field.name] = field.fieldType; // Store field name and type (or whatever defines it as non-object)
+          acc[field.name] = field.fieldType;
           return acc;
         },
         {}
       );
+      model.fields.forEach((field: any) => {
+        if (field.enumValues !== undefined || enumNames.has(field.fieldType)) {
+          this.enumFields.set(
+            `${model.name}.${field.name}`,
+            field.fieldType
+          );
+        }
+      });
     });
   }
 
@@ -901,7 +1145,38 @@ export class DB<M extends Models> {
         `Table '${String(tableName)}' does not exist in the schema.`
       );
     }
-    return new Table<M, T>(tableName, this.sqlClient, this.modelsDef); // Pass modelsDef to Table
+    return new Table<M, T>(
+      tableName,
+      this.sqlClient,
+      this.modelsDef,
+      this.enumFields
+    );
+  }
+
+  public with<R extends Query<M, any, any, any>>(
+    name: string,
+    cb: (db: DB<M>) => R,
+    resultType?: CteResultType
+  ): CteQuery<M, InferQueryTable<M, R>, InferQueryJoined<M, R>> {
+    const query = cb(this);
+    const { sql, params } = query.buildSelectSql();
+    const entry: CteEntry<M> = { name, sql, params, resultType };
+    return new CteQuery<M, InferQueryTable<M, R>, InferQueryJoined<M, R>>(
+      this.ast,
+      this.sqlClient,
+      this.modelsDef,
+      [entry],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      this.enumFields
+    );
   }
 
   public async transaction<R>(

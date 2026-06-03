@@ -7,27 +7,19 @@ export class BarcodeService {
   constructor() {}
 
   async getBarcodeList(limit: number, page: number) {
-    const count = await dikitDB
-      .table("barcode")
-      .where({
-        "barcode.is_active": true,
-      })
-      .count();
-    const products = await dikitDB
-      .table("barcode")
-      .select([])
-      .limit(limit)
-      .offset((page - 1) * limit)
+    const result = await dikitDB
+      .with("active_barcodes", (db) =>
+        db.table("barcode").where({
+          "barcode.is_active": true,
+        }),
+      )
+      .from("active_barcodes")
+      .limit(Number(limit))
+      .offset(Number((page - 1) * limit))
+      .select(["active_barcodes.code"])
       .execute();
 
-    return {
-      data: products,
-      meta: {
-        total: count,
-        page,
-        limit,
-      },
-    };
+    return result;
   }
 
   async getBarcodeById(id: number) {

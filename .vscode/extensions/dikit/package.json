@@ -1,13 +1,18 @@
 {
   "name": "dikit-syntax",
   "displayName": "Dikit Schema Syntax",
-  "description": "Syntax highlighting for .dikit schema files",
+  "description": "Syntax highlighting and LSP support for .dikit schema files",
   "version": "1.0.0",
   "engines": {
-    "vscode": "^1.0.0"
+    "vscode": "^1.97.0"
   },
+  "activationEvents": [
+    "onLanguage:dikit"
+  ],
+  "main": "./extension.js",
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Language Servers"
   ],
   "contributes": {
     "languages": [
@@ -20,7 +25,7 @@
         "extensions": [
           ".dikit"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language.configuration.json"
       }
     ],
     "grammars": [
@@ -30,5 +35,15 @@
         "path": "./syntaxes/dikit.tmLanguage.json"
       }
     ]
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   }
 }

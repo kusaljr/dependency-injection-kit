@@ -13,6 +13,20 @@
         }
       },
       {
+        "name": "Dikit Enum Names",
+        "scope": "entity.name.type.enum.dikit",
+        "settings": {
+          "foreground": "#FFD700"
+        }
+      },
+      {
+        "name": "Dikit Enum Values",
+        "scope": "constant.other.enum.dikit",
+        "settings": {
+          "foreground": "#F5A623"
+        }
+      },
+      {
         "name": "Dikit Model Names",
         "scope": "entity.name.type.model.dikit",
         "settings": {
@@ -24,28 +38,28 @@
         "name": "Dikit Field Names",
         "scope": "variable.other.property.dikit",
         "settings": {
-          "foreground": "#9CDCFE"
+          "foreground": "#82AAFF"
         }
       },
       {
         "name": "Dikit Types",
         "scope": "storage.type.dikit, storage.type.primitive.dikit",
         "settings": {
-          "foreground": "#569CD6"
+          "foreground": "#82AAFF"
         }
       },
       {
         "name": "Dikit Decorators",
         "scope": "entity.name.function.decorator.dikit",
         "settings": {
-          "foreground": "#DCDCAA"
+          "foreground": "#F78C6C"
         }
       },
       {
         "name": "Dikit Decorator Parameters",
         "scope": "variable.parameter.dikit",
         "settings": {
-          "foreground": "#CE9178"
+          "foreground": "#89DDFF"
         }
       },
       {
@@ -64,6 +78,39 @@
         }
       }
     ]
+  },
+  "editor.semanticTokenColorCustomizations": {
+    "enabled": true,
+    "rules": {
+      "keyword": {
+        "foreground": "#C586C0",
+        "bold": true
+      },
+      "enum": {
+        "foreground": "#FFD700"
+      },
+      "enumMember": {
+        "foreground": "#F5A623"
+      },
+      "type": {
+        "foreground": "#4EC9B0"
+      },
+      "property": {
+        "foreground": "#82AAFF"
+      },
+      "decorator": {
+        "foreground": "#F78C6C"
+      },
+      "number": {
+        "foreground": "#F78C6C"
+      },
+      "string": {
+        "foreground": "#C3E88D"
+      },
+      "operator": {
+        "foreground": "#89DDFF"
+      }
+    }
   },
   "workbench.colorCustomizations": {
     "editorBracketHighlight.foreground1": "#DA70D6",

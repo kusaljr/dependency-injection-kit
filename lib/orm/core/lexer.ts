@@ -3,6 +3,7 @@ import * as fs from "fs";
 export enum TokenType {
   MODEL_KEYWORD = "MODEL_KEYWORD",
   TYPE_KEYWORD = "TYPE_KEYWORD",
+  ENUM_KEYWORD = "ENUM_KEYWORD",
 
   INT_TYPE = "INT_TYPE",
   STRING_TYPE = "STRING_TYPE",
@@ -190,6 +191,8 @@ export class Lexer {
               return this.createToken(TokenType.MODEL_KEYWORD, value);
             case "type":
               return this.createToken(TokenType.TYPE_KEYWORD, value);
+            case "enum":
+              return this.createToken(TokenType.ENUM_KEYWORD, value);
             case "int":
               return this.createToken(TokenType.INT_TYPE, value);
             case "string":

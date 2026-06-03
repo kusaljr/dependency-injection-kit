@@ -17,7 +17,7 @@ export class BarcodeController {
   @Get()
   async getBarcodeList(
     @Query("page") page: number = 1,
-    @Query("limit") limit: number = 10
+    @Query("limit") limit: number = 10,
   ) {
     return this.barcodeService.getBarcodeList(limit, page);
   }

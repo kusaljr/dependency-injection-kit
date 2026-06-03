@@ -1,4 +1,4 @@
-import { FieldNode, ModelNode, SchemaNode } from "../core/ast";
+import { EnumNode, FieldNode, ModelNode, SchemaNode } from "../core/ast";
 
 export type DbDialect = "postgresql" | "mysql" | "sqlite" | "generic";
 
@@ -60,23 +60,31 @@ export class SqlGenerator {
     const statements: string[] = [];
 
     if (!previousSchema) {
-      console.log("🔍 Sorting tables by dependency order...");
+      // 1. Create enum types
+      if (this.ast.enums) {
+        this.ast.enums.forEach((enumNode) => {
+          statements.push(this.generateCreateEnum(enumNode));
+        });
+      }
 
+      // 2. Sort tables by dependency order
       const orderedModels = this.sortModelsByDependencies(this.ast.models);
 
-      // 1. Create standard tables
+      // 3. Create standard tables
       orderedModels.forEach((model) => {
         statements.push(this.generateCreateTable(model));
       });
 
-      // 2. Create Many-to-Many Join Tables (Must be done after models exist)
+      // 4. Create Many-to-Many Join Tables
       statements.push(...this.generateJoinTables(this.ast.models));
     } else {
+      // Handle enum changes
+      statements.push(
+        ...this.generateEnumMigrationStatements(previousSchema, this.ast)
+      );
       statements.push(
         ...this.generateMigrationStatements(previousSchema, this.ast)
       );
-      // Note: Handling M:N migrations (adding/removing join tables)
-      // requires more complex diffing logic not included in this snippet.
     }
 
     if (statements.length === 0) {
@@ -86,8 +94,39 @@ export class SqlGenerator {
     console.log("🛠 Generated migration statements:");
     statements.forEach((stmt) => console.log(stmt));
 
-    // throw new Error("Migration generation not wrapped in transaction yet.");
     return `BEGIN;\n${statements.join("\n")}\nCOMMIT;`;
+  }
+
+  private generateEnumMigrationStatements(
+    prev: SchemaNode,
+    curr: SchemaNode
+  ): string[] {
+    const stmts: string[] = [];
+    const prevEnums = prev.enums ?? [];
+    const currEnums = curr.enums ?? [];
+
+    for (const currEnum of currEnums) {
+      const prevEnum = prevEnums.find((e) => e.name === currEnum.name);
+      if (!prevEnum) {
+        stmts.push(this.generateCreateEnum(currEnum));
+      } else {
+        const newValues = currEnum.values.filter(
+          (v) => !prevEnum.values.includes(v)
+        );
+        newValues.forEach((val) => {
+          stmts.push(
+            `ALTER TYPE ${this.quote(currEnum.name)} ADD VALUE '${val}';`
+          );
+        });
+      }
+    }
+
+    return stmts;
+  }
+
+  private generateCreateEnum(enumNode: EnumNode): string {
+    const values = enumNode.values.map((v) => `'${v}'`).join(", ");
+    return `CREATE TYPE ${this.quote(enumNode.name)} AS ENUM (${values});`;
   }
 
   /**
@@ -152,12 +191,12 @@ export class SqlGenerator {
     const colA = `${"A"}_${pkA.name}`;
     const colB = `${"B"}_${pkB.name}`;
 
-    return `CREATE TABLE ${tableName} (
-  ${colA} ${rawTypeA} NOT NULL,
-  ${colB} ${rawTypeB} NOT NULL,
-  FOREIGN KEY (${colA}) REFERENCES ${modelA}(${pkA.name}) ON DELETE CASCADE,
-  FOREIGN KEY (${colB}) REFERENCES ${modelB}(${pkB.name}) ON DELETE CASCADE,
-  UNIQUE (${colA}, ${colB})
+    return `CREATE TABLE ${this.quote(tableName)} (
+  ${this.quote(colA)} ${rawTypeA} NOT NULL,
+  ${this.quote(colB)} ${rawTypeB} NOT NULL,
+  FOREIGN KEY (${this.quote(colA)}) REFERENCES ${this.quote(modelA)}(${this.quote(pkA.name)}) ON DELETE CASCADE,
+  FOREIGN KEY (${this.quote(colB)}) REFERENCES ${this.quote(modelB)}(${this.quote(pkB.name)}) ON DELETE CASCADE,
+  UNIQUE (${this.quote(colA)}, ${this.quote(colB)})
 );`;
   }
 
@@ -228,7 +267,9 @@ export class SqlGenerator {
   ): string[] {
     const stmts: string[] = [];
 
-    for (const model of curr.models) {
+    const orderedModels = this.sortModelsByDependencies(curr.models);
+
+    for (const model of orderedModels) {
       const prevModel = prev.models.find((m) => m.name === model.name);
       if (!prevModel) {
         stmts.push(this.generateCreateTable(model));
@@ -239,7 +280,7 @@ export class SqlGenerator {
 
     for (const prevModel of prev.models) {
       if (!curr.models.find((m) => m.name === prevModel.name)) {
-        stmts.push(`DROP TABLE ${prevModel.name};`);
+        stmts.push(`DROP TABLE ${this.quote(prevModel.name)} CASCADE;`);
       }
     }
 
@@ -258,7 +299,7 @@ export class SqlGenerator {
       const prevField = prevModel.fields.find((f) => f.name === field.name);
       if (!prevField) {
         const colSql = this.generateColumnDefinition(field);
-        stmts.push(`ALTER TABLE ${currModel.name} ADD COLUMN ${colSql};`);
+        stmts.push(`ALTER TABLE ${this.quote(currModel.name)} ADD COLUMN ${colSql};`);
       } else {
         stmts.push(
           ...this.generateColumnAlterStatements(
@@ -274,7 +315,7 @@ export class SqlGenerator {
       if (!this.isRealColumn(prevField)) continue;
       if (!currModel.fields.find((f) => f.name === prevField.name)) {
         stmts.push(
-          `ALTER TABLE ${currModel.name} DROP COLUMN ${prevField.name};`
+          `ALTER TABLE ${this.quote(currModel.name)} DROP COLUMN ${this.quote(prevField.name)};`
         );
       }
     }
@@ -293,16 +334,16 @@ export class SqlGenerator {
     if (prevField.isRequired !== currField.isRequired) {
       if (currField.isRequired) {
         stmts.push(
-          `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} SET NOT NULL;`
+          `ALTER TABLE ${this.quote(tableName)} ALTER COLUMN ${this.quote(currField.name)} SET NOT NULL;`
         );
       } else {
         if (prevField.isPrimaryKey) {
           stmts.push(
-            `-- WARNING: Attempt to DROP NOT NULL on primary key column ${currField.name} skipped.`
+            `-- WARNING: Attempt to DROP NOT NULL on primary key column ${this.quote(currField.name)} skipped.`
           );
         } else {
           stmts.push(
-            `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} DROP NOT NULL;`
+            `ALTER TABLE ${this.quote(tableName)} ALTER COLUMN ${this.quote(currField.name)} DROP NOT NULL;`
           );
         }
       }
@@ -315,7 +356,7 @@ export class SqlGenerator {
     ) {
       if (currField.defaultValue === undefined) {
         stmts.push(
-          `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} DROP DEFAULT;`
+          `ALTER TABLE ${this.quote(tableName)} ALTER COLUMN ${this.quote(currField.name)} DROP DEFAULT;`
         );
       } else {
         let defaultVal = "";
@@ -333,18 +374,28 @@ export class SqlGenerator {
               : String(currField.defaultValue);
         }
         stmts.push(
-          `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} SET DEFAULT ${defaultVal};`
+          `ALTER TABLE ${this.quote(tableName)} ALTER COLUMN ${this.quote(currField.name)} SET DEFAULT ${defaultVal};`
         );
       }
     }
 
     // Type change
     if (currField.fieldType !== prevField.fieldType) {
-      const sqlType = this.mapFieldTypeToSql(currField.fieldType);
+      let sqlType: string | undefined;
+      if (currField.enumValues !== undefined) {
+        sqlType = currField.fieldType;
+      } else {
+        sqlType = this.mapFieldTypeToSql(currField.fieldType);
+      }
       if (sqlType) {
-        let alter = `ALTER TABLE ${tableName} ALTER COLUMN ${currField.name} TYPE ${sqlType}`;
+        let alter = `ALTER TABLE ${this.quote(tableName)} ALTER COLUMN ${this.quote(currField.name)} TYPE ${sqlType}`;
         if (this.dialect === "postgresql" && currField.fieldType === "json") {
           alter += ` USING ${currField.name}::${sqlType}`;
+        } else if (
+          this.dialect === "postgresql" &&
+          currField.enumValues !== undefined
+        ) {
+          alter += ` USING ${currField.name}::${this.quote(currField.fieldType)}`;
         }
         alter += ";";
         stmts.push(alter);
@@ -354,7 +405,7 @@ export class SqlGenerator {
     // Unique constraint change
     if (prevField.isUnique !== currField.isUnique) {
       if (currField.isUnique) {
-        stmts.push(`ALTER TABLE ${tableName} ADD UNIQUE (${currField.name});`);
+        stmts.push(`ALTER TABLE ${this.quote(tableName)} ADD UNIQUE (${this.quote(currField.name)});`);
       } else {
         stmts.push(
           `-- WARNING: UNIQUE constraint removal for ${currField.name} not automated.`
@@ -377,7 +428,7 @@ export class SqlGenerator {
 
     if (model.combinedUniques) {
       model.combinedUniques.forEach((fields) => {
-        constraints.push(`UNIQUE (${fields.join(", ")})`);
+        constraints.push(`UNIQUE (${fields.map((f) => this.quote(f)).join(", ")})`);
       });
     }
 
@@ -389,19 +440,25 @@ export class SqlGenerator {
         field.relation.type !== "many_to_many"
       ) {
         constraints.push(
-          `FOREIGN KEY (${field.relation.foreignKey}) REFERENCES ${field.fieldType}(id)`
+          `FOREIGN KEY (${this.quote(field.relation.foreignKey)}) REFERENCES ${this.quote(field.fieldType)}(${this.quote("id")})`
         );
       }
     });
 
-    return `CREATE TABLE ${model.name} (\n  ${[...columns, ...constraints].join(
+    return `CREATE TABLE ${this.quote(model.name)} (\n  ${[...columns, ...constraints].join(
       ",\n  "
     )}\n);`;
   }
 
   private generateColumnDefinition(field: FieldNode): string {
-    // ... (Existing column def logic remains valid)
-    let sqlType = this.mapFieldTypeToSql(field.fieldType);
+    let sqlType: string | undefined;
+
+    if (field.enumValues !== undefined) {
+      sqlType = field.fieldType;
+    } else {
+      sqlType = this.mapFieldTypeToSql(field.fieldType);
+    }
+
     if (!sqlType) throw new Error(`No SQL type for ${field.fieldType}`);
 
     // Handle json arrays
@@ -421,7 +478,7 @@ export class SqlGenerator {
       }
     }
 
-    let col = `${field.name} ${sqlType}`;
+    let col = `${this.quote(field.name)} ${sqlType}`;
 
     if (field.isPrimaryKey) {
       if (
@@ -501,14 +558,21 @@ export class SqlGenerator {
 
   private mapFieldTypeToSql(fieldType: string): string | undefined {
     const mapping = TYPE_MAPPINGS[fieldType];
-    return mapping ? mapping[this.dialect] || mapping.generic : undefined;
+    if (mapping) return mapping[this.dialect] || mapping.generic;
+    // Check if fieldType is an enum type name defined in the schema
+    if (this.ast.enums?.some((e) => e.name === fieldType)) {
+      return fieldType;
+    }
+    return undefined;
   }
 
   private isRealColumn(field: FieldNode): boolean {
-    // If it's a many-to-many field, it is NOT a real column in the main table
-    // It exists only in the Join Table.
     if (field.relation?.type === "many_to_many") return false;
-
+    if (field.enumValues !== undefined) return true;
     return TYPE_MAPPINGS[field.fieldType] !== undefined;
+  }
+
+  private quote(id: string): string {
+    return `"${id}"`;
   }
 }

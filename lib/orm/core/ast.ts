@@ -6,7 +6,8 @@ export interface AstNode {
 export interface SchemaNode extends AstNode {
   kind: "Schema";
   models: ModelNode[];
-  types?: TypeNode[]; // NEW: Support for custom types (e.g. JSON shapes)
+  enums?: EnumNode[];
+  types?: TypeNode[];
 }
 
 export interface ModelNode extends AstNode {
@@ -29,7 +30,8 @@ export type FieldType =
   | "float"
   | "boolean"
   | "json"
-  | string; // allow custom types (e.g. json type names)
+  | "enum"
+  | string;
 
 export interface FieldNode extends AstNode {
   kind: "Field";
@@ -44,8 +46,9 @@ export interface FieldNode extends AstNode {
   isUnique?: boolean;
   isNullable?: boolean;
   isRequired?: boolean;
-  defaultValue?: string | number | boolean | { [key: string]: any }; // support default values, including JSON objects
-  jsonTypeDefinition?: JsonTypeDefinitionNode; // NEW: inline JSON type definition
+  defaultValue?: string | number | boolean | { [key: string]: any };
+  jsonTypeDefinition?: JsonTypeDefinitionNode;
+  enumValues?: string[];
 }
 
 export interface JsonTypeDefinitionNode extends AstNode {
@@ -63,7 +66,12 @@ export interface JsonFieldNode extends AstNode {
   isRequired?: boolean;
 }
 
-// NEW: support custom type declarations (like `type Foo { ... }`)
+export interface EnumNode extends AstNode {
+  kind: "Enum";
+  name: string;
+  values: string[];
+}
+
 export interface TypeNode extends AstNode {
   kind: "Type";
   name: string;

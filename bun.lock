@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "di-lib",
@@ -1114,7 +1115,7 @@
 
     "serialize-javascript": ["serialize-javascript@6.0.2", "", { "dependencies": { "randombytes": "^2.1.0" } }, "sha512-Saa1xPByTTq2gdeFZYLLo+RFE35NHZkAbqZeWNd3BpzppeVisAqpDjcp8dyf6uIvEqJRd46jemmyA4iFIeVk8g=="],
 
-    "server": ["server@github:react-dom/server#9c6de71", {}, "react-dom-server-9c6de71"],
+    "server": ["server@github:react-dom/server#9c6de71", {}, "react-dom-server-9c6de71", "sha512-T9xASJL+yfbI1rShw1+qTaCsljhkqrnmf93P8/q17qoBVQWIPykzYA1TOpeVjZk44N13brOCnN319ArxWmcOnw=="],
 
     "set-blocking": ["set-blocking@2.0.0", "", {}, "sha512-KiKBS8AnWGEyLzofFfmvKwpdPzqiy16LvQfK3yv/fVH7Bj13/wl3JSR1J+rfgRE9q7xUJK4qvgS8raSOeLUehw=="],
 

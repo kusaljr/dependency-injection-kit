@@ -1,8 +1,30 @@
 import { SQL } from "bun";
-import { FieldNode, ModelNode, RelationEnum, SchemaNode } from "../core/ast";
+import { EnumNode, FieldNode, ModelNode, RelationEnum, SchemaNode } from "../core/ast";
 
 export async function fetchSchemaAstFromDb(sql: SQL): Promise<SchemaNode> {
-  // 1. Fetch columns
+  // 1. Fetch enums
+  const enumRows = await sql`
+    SELECT
+      t.typname AS enum_name,
+      array_agg(e.enumlabel ORDER BY e.enumsortorder) AS enum_values
+    FROM pg_type t
+    JOIN pg_enum e ON t.oid = e.enumtypid
+    JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+    WHERE n.nspname = 'public'
+    GROUP BY t.typname
+  `;
+
+  const enumNodes: EnumNode[] = (enumRows as any[]).map((row: any) => ({
+    kind: "Enum" as const,
+    name: row.enum_name,
+    values: row.enum_values,
+    line: 0,
+    column: 0,
+  }));
+
+  const enumNames = new Set(enumNodes.map((e) => e.name));
+
+  // 2. Fetch columns
   const columns = await sql`
     SELECT
       c.table_name,
@@ -15,7 +37,7 @@ export async function fetchSchemaAstFromDb(sql: SQL): Promise<SchemaNode> {
     WHERE c.table_schema = 'public'
   `;
 
-  // 2. Fetch constraints
+  // 3. Fetch constraints
   const constraints = await sql`
     SELECT
       con.conname,
@@ -41,14 +63,30 @@ export async function fetchSchemaAstFromDb(sql: SQL): Promise<SchemaNode> {
       };
     }
 
-    const { type, isArray } = mapPgTypeToFieldType(col.data_type, col.udt_name);
+    let { type, isArray } = mapPgTypeToFieldType(col.data_type, col.udt_name);
+    let enumValues: string[] | undefined;
+
+    if (col.data_type === "USER-DEFINED" && enumNames.has(col.udt_name)) {
+      type = col.udt_name;
+      const enumNode = enumNodes.find((e) => e.name === col.udt_name);
+      enumValues = enumNode?.values;
+    } else if (col.data_type === "ARRAY" && col.udt_name.startsWith("_")) {
+      const innerType = col.udt_name.slice(1);
+      if (enumNames.has(innerType)) {
+        type = innerType;
+        isArray = true;
+        const enumNode = enumNodes.find((e) => e.name === innerType);
+        enumValues = enumNode?.values;
+      }
+    }
 
     const field: FieldNode = {
       kind: "Field",
       name: col.column_name,
       fieldType: type,
       isArray,
-      isPrimaryKey: false, // Will be set via constraints
+      enumValues,
+      isPrimaryKey: false,
       isRequired: col.is_nullable === "NO",
       isUnique: false,
       defaultValue: parsePgDefault(col.column_default),
@@ -190,6 +228,7 @@ export async function fetchSchemaAstFromDb(sql: SQL): Promise<SchemaNode> {
   return {
     kind: "Schema",
     models: finalModels,
+    enums: enumNodes.length > 0 ? enumNodes : undefined,
     line: 0,
     column: 0,
   };

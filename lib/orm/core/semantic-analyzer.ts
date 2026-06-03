@@ -1,4 +1,4 @@
-import { FieldNode, ModelNode, SchemaNode } from "./core/ast";
+import { EnumNode, FieldNode, ModelNode, SchemaNode } from "./ast";
 
 export class SemanticError extends Error {
   constructor(message: string, public line: number, public column: number) {
@@ -12,6 +12,7 @@ export class SemanticAnalyzer {
   private errors: SemanticError[] = [];
 
   private declaredModelNames: Set<string> = new Set();
+  private declaredEnumNames: Set<string> = new Set();
   private declaredFieldNamesInCurrentModel: Set<string> = new Set();
 
   constructor(ast: SchemaNode) {
@@ -21,6 +22,7 @@ export class SemanticAnalyzer {
   public analyze(): SemanticError[] {
     this.errors = [];
     this.declaredModelNames.clear();
+    this.declaredEnumNames.clear();
 
     this.visitSchema(this.ast);
 
@@ -28,8 +30,51 @@ export class SemanticAnalyzer {
   }
 
   private visitSchema(node: SchemaNode): void {
+    if (node.enums) {
+      node.enums.forEach((enumNode) => {
+        this.visitEnum(enumNode);
+      });
+    }
     node.models.forEach((model) => {
       this.visitModel(model);
+    });
+  }
+
+  private visitEnum(node: EnumNode): void {
+    if (this.declaredEnumNames.has(node.name)) {
+      this.errors.push(
+        new SemanticError(
+          `Duplicate enum name '${node.name}'. Enum names must be unique.`,
+          node.line,
+          node.column
+        )
+      );
+    } else {
+      this.declaredEnumNames.add(node.name);
+    }
+
+    if (node.values.length === 0) {
+      this.errors.push(
+        new SemanticError(
+          `Enum '${node.name}' must have at least one value.`,
+          node.line,
+          node.column
+        )
+      );
+    }
+
+    const seenValues = new Set<string>();
+    node.values.forEach((val) => {
+      if (seenValues.has(val)) {
+        this.errors.push(
+          new SemanticError(
+            `Duplicate enum value '${val}' in enum '${node.name}'.`,
+            node.line,
+            node.column
+          )
+        );
+      }
+      seenValues.add(val);
     });
   }
 
@@ -80,6 +125,16 @@ export class SemanticAnalyzer {
       this.errors.push(
         new SemanticError(
           `Field name '${node.name}' must be in snake_case (e.g., 'first_name'). Do not use capital letters or hyphens.`,
+          node.line,
+          node.column
+        )
+      );
+    }
+
+    if (node.enumValues !== undefined && !this.declaredEnumNames.has(node.fieldType)) {
+      this.errors.push(
+        new SemanticError(
+          `Enum type '${node.fieldType}' is not declared. Declare it with 'enum ${node.fieldType} { ... }' before using it.`,
           node.line,
           node.column
         )

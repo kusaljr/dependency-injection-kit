@@ -1,10 +1,17 @@
 
 
+enum ProductStatus {
+  ACTIVE,
+  INACTIVE,
+  DRAFT,
+  ARCHIVED
+}
+
 model barcode {
   id int @primary_key @default(autoincrement())
   code string @unique @required
   is_active boolean @default(true)
-
+  
   metadata json {
     description: string
     non_vegetarian: boolean
@@ -41,7 +48,7 @@ model product {
   name string @required
   description string
   price float @required
-
+  status ProductStatus @default()
   barcode barcode @one_to_one
 
   brand_id int 
